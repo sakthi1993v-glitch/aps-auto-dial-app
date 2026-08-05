@@ -19,6 +19,24 @@ from this source, once per phone).
 - CALL_PHONE permission request on first launch.
 - `tel:` link interception -> `ACTION_CALL` (falls back to `ACTION_DIAL`, one tap, if
   permission isn't granted yet).
+- Loading spinner + retry-able error screen (no more silent blank white on a failed load).
+
+## Auto-update (v1.1+)
+
+The app has no Play Store, so it self-checks `version.json` (raw file on `main`, this repo
+must stay **public** for this to work without embedding a token) on every launch. If the
+remote `versionCode` is higher than the running build, it downloads the new APK
+(`DownloadManager`) and prompts the system installer (`FileProvider` + `ACTION_VIEW`).
+Android still requires one final "Install" tap — no app can silently self-install without
+root/device-owner privileges, this is the closest to fully-automatic that's possible.
+
+**Releasing a new version — do all four, in order, or the update-check won't fire:**
+1. Bump `versionCode` (and `versionName`) in `app/build.gradle.kts`.
+2. Push to `main` -> GitHub Actions builds the APK (Actions tab -> Artifacts).
+3. Create/update a GitHub Release tag (e.g. `v1.2-debug`) with that APK attached
+   (`gh release create` or `gh release upload --clobber`).
+4. Update `version.json` at the repo root with the new `versionCode`/`versionName`/`apkUrl`
+   (the release asset URL from step 3) and push it to `main`.
 
 ## Planned next (not built yet)
 

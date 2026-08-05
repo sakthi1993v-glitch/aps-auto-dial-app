@@ -106,6 +106,7 @@ class MainActivity : ComponentActivity() {
         }
 
         requestCallPermissionIfNeeded()
+        UpdateChecker.checkForUpdate(this)
     }
 
     private fun buildErrorView(): View {
