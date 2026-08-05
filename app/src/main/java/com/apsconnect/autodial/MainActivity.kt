@@ -142,12 +142,30 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestCallPermissionIfNeeded() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE)
-            != PackageManager.PERMISSION_GRANTED
+        // 2026-08-05: CALL_PHONE (auto-dial) + READ_PHONE_STATE + READ_CALL_LOG (call-duration
+        // tracking) requested together, one dialog -- staff taps Allow once, not three times.
+        val needed = arrayOf(
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_CALL_LOG
+        ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+
+        if (needed.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, needed.toTypedArray(), callPermissionRequestCode)
+        } else {
+            CallLogReporter.startListening(this)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == callPermissionRequestCode &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                this, arrayOf(Manifest.permission.CALL_PHONE), callPermissionRequestCode
-            )
+            CallLogReporter.startListening(this)
         }
     }
 
@@ -170,5 +188,10 @@ class MainActivity : ComponentActivity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    }
+
+    override fun onDestroy() {
+        CallLogReporter.stopListening(this)
+        super.onDestroy()
     }
 }

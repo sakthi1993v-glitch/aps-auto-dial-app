@@ -38,7 +38,27 @@ root/device-owner privileges, this is the closest to fully-automatic that's poss
 4. Update `version.json` at the repo root with the new `versionCode`/`versionName`/`apkUrl`
    (the release asset URL from step 3) and push it to `main`.
 
+## Call-duration tracking (v1.2+)
+
+`CallLogReporter.kt` listens for phone-state transitions (`PhoneStateListener`,
+`READ_PHONE_STATE`) and detects a call ending (OFFHOOK -> IDLE). It then reads the just-
+finished call's duration from `CallLog` (`READ_CALL_LOG`, ~1.5s delay for the log write to
+land) and POSTs `{phone, durationSec, answered}` to
+`https://agent.adiparasakthicharitabletrust.in/crm/api/leads/call-event` -- **note the
+`/crm` prefix**: this is a raw native HTTP call, not a browser-rendered page, so it must hit
+the CRM's real gateway path directly (nothing rewrites it the way `crmProxy.js`'s HTML
+text-replace does for the WebView's own `/api/...` calls). The request reuses the WebView's
+session cookie (`CookieManager.getInstance().getCookie(...)`) as a `Cookie` header, since
+`auth.requireAuth` on the gateway rejects any `/crm/*` request without a valid session --
+the native HTTP client has no cookie jar of its own.
+
+The CRM already had a `callEvents[]` field reserved on every lead (unused placeholder from
+an earlier phase) and the staff stats bubble / manager progress card already display
+whatever's summed from it (an honest "Soon"/"0m" placeholder before this landed) -- this
+version is the first one that actually produces that data.
+
 ## Planned next (not built yet)
 
-- READ_CALL_LOG -> capture call duration, sync back to the CRM for the per-staff daily
-  call report (calls attended / talk time / idle time between calls).
+- Idle-time-between-calls (gaps in the callEvents timeline) for the manager-side daily
+  report -- computable from timestamps already being logged, no new tracking needed, just
+  a report view.
