@@ -6,7 +6,7 @@
     <!-- Auto-update (2026-08-05): app downloads its own APK + prompts install. Android 8+
          needs this explicit permission (one-time "allow this app to install apps" grant). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <!-- 2026-08-05: call-duration tracking -- READ_PHONE_STATE to detect call-end via
+    <!-- 2026-08-05: call-duration tracking. READ_PHONE_STATE to detect call-end via
          TelephonyManager, READ_CALL_LOG to read the actual duration afterward. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
