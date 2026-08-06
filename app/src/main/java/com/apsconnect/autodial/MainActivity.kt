@@ -218,9 +218,24 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent(action, Uri.parse("tel:$phoneNumber")))
     }
 
+    // v1.5 (2026-08-06): back button azhuthina UDANE app veliya pōyiduchu -- staff oru lead
+    // update panra naduvula thappa back thottaa velai pōyidum (user complaint). Ippo WebView
+    // history irundhaa pazhaya maadhiri back pōgum; app-a MUDIKKURA back-ku mattum
+    // "veliya pōganumaa?" nu kēkkum. Confirm dialog = NATIVE AlertDialog, ENDHA reason-kum
+    // JS confirm() illa -- indha app-la WebChromeClient set pannala, adhanaala
+    // window.confirm() eppovum silent-a false thirumbum (CRM-la adhukku thani fix pōttaachu).
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+        if (webView.canGoBack()) {
+            webView.goBack()
+            return
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Veliya pōganumaa?")
+            .setMessage("APS Connect app-a close pannattumaa?")
+            .setPositiveButton("Aamaam, veliya pō") { _, _ -> finish() }
+            .setNegativeButton("Illa, irukkatum", null)
+            .show()
     }
 
     override fun onDestroy() {
