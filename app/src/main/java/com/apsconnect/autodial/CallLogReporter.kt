@@ -4,7 +4,9 @@ import android.content.Context
 import android.provider.CallLog
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
+import android.util.Log
 import android.webkit.CookieManager
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -13,9 +15,19 @@ import java.net.URL
 // real duration from CallLog, and reports it back to the CRM so staff/manager can see real
 // talk time (crm/index.html's stats bubble + staff progress card were already wired to
 // display this the moment call-event data starts arriving -- this is the missing producer).
+//
+// 2026-08-06 (v1.3): manager complained ZERO call-events ever reached the server -- silent
+// exception-swallowing in postCallEvent() meant a permission gap / gateway hang / dead network
+// during the earlier :5007 outage all failed the SAME invisible way. Fix: every failed post
+// (or one that can't even be attempted -- no cookie yet, app not in foreground) is persisted
+// to a local SharedPreferences queue instead of dropped, and re-flushed on the next call-end AND
+// on every app launch. Logcat tag "CallLogReporter" also added for on-device debugging.
 object CallLogReporter {
 
     private const val CALL_EVENT_URL = "https://agent.adiparasakthicharitabletrust.in/crm/api/leads/call-event"
+    private const val PREFS = "call_event_queue"
+    private const val QUEUE_KEY = "pending"
+    private const val TAG = "CallLogReporter"
 
     private var listener: PhoneStateListener? = null
     private var wasOffHook = false
@@ -45,6 +57,8 @@ object CallLogReporter {
         }
         telephonyManager.listen(l, PhoneStateListener.LISTEN_CALL_STATE)
         listener = l
+        Log.i(TAG, "startListening: PhoneStateListener registered")
+        flushQueue(context)   // app launch -- retry anything stuck from a previous session
     }
 
     fun stopListening(context: Context) {
@@ -70,39 +84,87 @@ object CallLogReporter {
                 val type = it.getInt(it.getColumnIndexOrThrow(CallLog.Calls.TYPE))
                 // OUTGOING + duration>0 -> answered. MISSED/REJECTED/duration=0 -> not answered.
                 val answered = type == CallLog.Calls.OUTGOING_TYPE && durationSec > 0
-                postCallEvent(number, durationSec, answered)
+                Log.i(TAG, "reportLatestCall: number=***${number.takeLast(4)} durationSec=$durationSec answered=$answered")
+                postCallEvent(context, number, durationSec, answered)
             }
         } catch (e: Exception) {
             // CallLog read fail aana (permission revoke aagirukkalam) -- app crash aagakoodathu,
             // idha silent-a skip pannanum, next call try pannum.
+            Log.e(TAG, "reportLatestCall: CallLog read failed", e)
         }
     }
 
-    private fun postCallEvent(number: String, durationSec: Int, answered: Boolean) {
-        Thread {
-            try {
-                val url = URL(CALL_EVENT_URL)
-                val conn = url.openConnection() as HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json")
-                // WebView login session cookie reuse pannurom -- native HTTP call oda own
-                // cookie jar illa, gateway (auth.requireAuth) idha kaanama reject pannidum.
-                val cookie = CookieManager.getInstance().getCookie("https://agent.adiparasakthicharitabletrust.in")
-                if (cookie != null) conn.setRequestProperty("Cookie", cookie)
-                conn.connectTimeout = 8000
-                conn.readTimeout = 8000
+    private fun eventJson(number: String, durationSec: Int, answered: Boolean) = JSONObject().apply {
+        put("phone", number)
+        put("durationSec", durationSec)
+        put("answered", answered)
+    }
 
-                val body = JSONObject().apply {
-                    put("phone", number)
-                    put("durationSec", durationSec)
-                    put("answered", answered)
-                }
-                conn.outputStream.use { it.write(body.toString().toByteArray()) }
-                conn.inputStream.use { it.readBytes() }
-                conn.disconnect()
-            } catch (e: Exception) {
-                // Network illa / gateway down -- silent skip, next call-layil try pannum.
+    private fun postCallEvent(context: Context, number: String, durationSec: Int, answered: Boolean) {
+        val event = eventJson(number, durationSec, answered)
+        Thread {
+            if (!sendOne(event)) {
+                Log.w(TAG, "postCallEvent: send failed, queuing for retry")
+                enqueue(context, event)
+            } else {
+                Log.i(TAG, "postCallEvent: sent OK")
+            }
+            flushQueue(context)   // pazhaya queued events-um try pannu, idhoda sequence-la
+        }.start()
+    }
+
+    // true = server accepted (2xx). false = anything else (network/timeout/non-2xx) -- caller
+    // queues it, never silently drops.
+    private fun sendOne(event: JSONObject): Boolean {
+        return try {
+            val url = URL(CALL_EVENT_URL)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            // WebView login session cookie reuse pannurom -- native HTTP call oda own
+            // cookie jar illa, gateway (auth.requireAuth) idha kaanama reject pannidum.
+            val cookie = CookieManager.getInstance().getCookie("https://agent.adiparasakthicharitabletrust.in")
+            if (cookie != null) conn.setRequestProperty("Cookie", cookie)
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.outputStream.use { it.write(event.toString().toByteArray()) }
+            val ok = conn.responseCode in 200..299
+            if (ok) conn.inputStream.use { it.readBytes() } else conn.errorStream?.use { it.readBytes() }
+            conn.disconnect()
+            if (!ok) Log.w(TAG, "sendOne: server rejected, code=${conn.responseCode}")
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "sendOne: network error", e)
+            false
+        }
+    }
+
+    private fun enqueue(context: Context, event: JSONObject) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val arr = JSONArray(prefs.getString(QUEUE_KEY, "[]"))
+        arr.put(event)
+        prefs.edit().putString(QUEUE_KEY, arr.toString()).apply()
+    }
+
+    // Drains the local retry queue. Stops at the first still-failing event (keeps order,
+    // avoids hammering the server with the whole backlog when it's down).
+    fun flushQueue(context: Context) {
+        Thread {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val arr = JSONArray(prefs.getString(QUEUE_KEY, "[]"))
+            if (arr.length() == 0) return@Thread
+            Log.i(TAG, "flushQueue: ${arr.length()} pending event(s)")
+            var i = 0
+            while (i < arr.length()) {
+                if (!sendOne(arr.getJSONObject(i))) break
+                i++
+            }
+            if (i > 0) {
+                val remaining = JSONArray()
+                for (j in i until arr.length()) remaining.put(arr.get(j))
+                prefs.edit().putString(QUEUE_KEY, remaining.toString()).apply()
+                Log.i(TAG, "flushQueue: sent $i, ${remaining.length()} still pending")
             }
         }.start()
     }
