@@ -12,6 +12,8 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -73,6 +75,16 @@ class MainActivity : ComponentActivity() {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true   // CRM login state uses sessionStorage
 
+        // 2026-08-06 (v1.3): stale-cache complaints — server hang aana nerathu WebView pazhaya
+        // failed/blank page-a cache pannitu, server sari aana appuram-um adha kaatitu irundhadhu.
+        // Fix rendu layer:
+        //  1. Ovvoru launch-ilum HTTP cache muzhusa clear + cacheMode=LOAD_NO_CACHE — page eppovum
+        //     server-la irundhu fresh-a varum, pazhaya cached copy ODAVE run aagadhu.
+        //  2. App version maarina (update install aana first launch) FULL wipe — WebStorage
+        //     (localStorage/indexedDB) + cookies + history ellame delete, fresh-install madhiri.
+        //     Cookies pona staff oru thadava re-login pannuvanga — adhu expected, one time.
+        wipeStaleState()
+
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
@@ -107,6 +119,27 @@ class MainActivity : ComponentActivity() {
 
         requestCallPermissionIfNeeded()
         UpdateChecker.checkForUpdate(this)
+    }
+
+    // v1.3: pazhaya cache/state odave run aagakoodadhu.
+    // Ovvoru launch: HTTP cache clear + LOAD_NO_CACHE (page eppovum server fresh).
+    // Version upgrade first launch: WebStorage + cookies + history FULL wipe (fresh install
+    // madhiri) — appuram indha versionCode-a kurichi vachukkum, adutha launches normal.
+    private fun wipeStaleState() {
+        webView.clearCache(true)
+        webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+
+        val prefs = getSharedPreferences("app_state", MODE_PRIVATE)
+        val lastVersion = prefs.getInt("lastVersionCode", -1)
+        if (lastVersion != BuildConfig.VERSION_CODE) {
+            webView.clearHistory()
+            webView.clearFormData()
+            WebStorage.getInstance().deleteAllData()
+            val cm = CookieManager.getInstance()
+            cm.removeAllCookies(null)
+            cm.flush()
+            prefs.edit().putInt("lastVersionCode", BuildConfig.VERSION_CODE).apply()
+        }
     }
 
     private fun buildErrorView(): View {
