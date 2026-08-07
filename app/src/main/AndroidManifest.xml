@@ -10,6 +10,10 @@
          TelephonyManager, READ_CALL_LOG to read the actual duration afterward. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- 2026-08-06 (v1.6): Bulk SMS. The CRM queues numbers, this app pulls them one at a
+         time and sends through the phone's own SIM, so the staff member's existing daily
+         SMS allowance is what pays for it. Server side counts and caps; this only sends. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
 
     <application
         android:allowBackup="true"

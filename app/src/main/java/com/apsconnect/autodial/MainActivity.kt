@@ -177,16 +177,32 @@ class MainActivity : ComponentActivity() {
     private fun requestCallPermissionIfNeeded() {
         // 2026-08-05: CALL_PHONE (auto-dial) + READ_PHONE_STATE + READ_CALL_LOG (call-duration
         // tracking) requested together, one dialog -- staff taps Allow once, not three times.
+        // 2026-08-06 (v1.6): SEND_SMS joins the same batch, for Bulk SMS.
         val needed = arrayOf(
             Manifest.permission.CALL_PHONE,
             Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_CALL_LOG
+            Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.SEND_SMS
         ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
 
         if (needed.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, needed.toTypedArray(), callPermissionRequestCode)
         } else {
+            startBackgroundWorkers()
+        }
+    }
+
+    // Each worker is gated on ITS OWN permission -- a staff member who allows calls but
+    // denies SMS (or the reverse) must still get the half that works, not neither.
+    private fun startBackgroundWorkers() {
+        val granted = { p: String -> ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED }
+
+        if (granted(Manifest.permission.READ_PHONE_STATE) && granted(Manifest.permission.READ_CALL_LOG)) {
             CallLogReporter.startListening(this)
+        }
+        if (granted(Manifest.permission.SEND_SMS)) {
+            // Label = what the manager sees in the dashboard's phone list.
+            BulkSmsSender.start(this, android.os.Build.MODEL)
         }
     }
 
@@ -194,12 +210,7 @@ class MainActivity : ComponentActivity() {
         requestCode: Int, permissions: Array<String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == callPermissionRequestCode &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
-        ) {
-            CallLogReporter.startListening(this)
-        }
+        if (requestCode == callPermissionRequestCode) startBackgroundWorkers()
     }
 
     private fun dial(phoneNumber: String) {
@@ -240,6 +251,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         CallLogReporter.stopListening(this)
+        BulkSmsSender.stop()
         super.onDestroy()
     }
 }
