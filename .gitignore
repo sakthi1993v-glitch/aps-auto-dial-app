@@ -3,3 +3,10 @@ build/
 *.iml
 .idea/
 local.properties
+
+# 2026-08-07: the signing key never belongs in this repo (it is PUBLIC).
+# It lives in the ANDROID_KEYSTORE_B64 GitHub secret, with a local backup at
+# C:\Users\sakth\aps-app-signing\ (README.txt there explains recovery).
+*.p12
+*.jks
+*.keystore

@@ -23,8 +23,41 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # 2026-08-07: without this the runner has no debug.keystore, so Gradle invents a NEW
+      # random signing key every build. v1.4/v1.5/v1.6 each shipped a different certificate,
+      # so Android refused every update ("App not installed") and the in-app updater looped
+      # forever. One fixed key now comes from the ANDROID_KEYSTORE_B64 secret.
+      # The file is written outside the workspace so it can never be picked up by the APK
+      # build or uploaded as an artifact (this repo is public).
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 secret is missing — refusing to build an APK"
+            echo "that would be signed with a throwaway key and could never install as an update."
+            exit 1
+          fi
+          mkdir -p "$HOME/signing"
+          echo "$KEYSTORE_B64" | base64 -d > "$HOME/signing/apsconnect.p12"
+          echo "ANDROID_KEYSTORE_PATH=$HOME/signing/apsconnect.p12" >> "$GITHUB_ENV"
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
+
+      # Fail loudly if the APK did not come out signed with the shared key -- a silently
+      # wrong-signed release is exactly the bug this whole change exists to prevent.
+      - name: Verify APK signature
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          echo "using $APKSIGNER"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee /tmp/certs.txt
+          EXPECTED=a90e23a46af9163259e3aa6b5e1a76e3fb1de94d8d1a60624d87869dbd11acbc
+          if ! grep -qi "$EXPECTED" /tmp/certs.txt; then
+            echo "::error::APK is signed with the WRONG key. Expected cert SHA-256 $EXPECTED"
+            exit 1
+          fi
+          echo "signature OK — matches the shared key"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
