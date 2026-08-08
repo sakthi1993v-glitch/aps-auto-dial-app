@@ -57,8 +57,51 @@ an earlier phase) and the staff stats bubble / manager progress card already dis
 whatever's summed from it (an honest "Soon"/"0m" placeholder before this landed) -- this
 version is the first one that actually produces that data.
 
+## Data-accuracy fixes (v1.8)
+
+Three things were reporting confidently wrong data to the CRM. All three are producer-side
+fixes in this app -- no CRM/server change is needed, though the server can now *optionally*
+read one new field (see the SMS item).
+
+**1. Only calls this app dialed are reported.** `CallLogReporter` detected a call ending and
+then read the *newest* `CallLog` row, without checking whether this app had dialed it. So a
+staff member's own outgoing call, or any incoming call they took, was posted as that lead's
+call-event -- talk time the manager's stats showed for leads nobody had called. `MainActivity.dial()`
+now hands the number to `CallLogReporter.expectCall()`, and the call-end handler reports only
+when the call-log row matches it (digits-only, last 9 compared -- the log returns
+`+91 98765 43210` where the CRM's `tel:` link has `9876543210`). The expectation is consumed
+once and expires after 4h, so a manual redial of the same lead the next day isn't attributed
+to the app.
+
+**2. Bulk SMS "sent" now means actually sent.** `sendTextMessage(..., null, null)` was called
+with no `sentIntent`, and `ok=true` was reported whenever that call didn't throw -- but it only
+means "handed to the framework". No signal, radio off, or a null PDU all return normally, so
+the CRM counted messages that never left the phone. Each part now gets a `PendingIntent` and
+the real framework result code decides `ok`, with the failure reason (`no_service`,
+`radio_off`, `null_pdu`, `generic_failure`) sent along on failure. The result body carries a
+new `confirmed` boolean: on a 45s confirmation timeout the send is reported as `ok=true,
+confirmed=false` **on purpose** -- re-sending would text the lead twice and burn the staff
+member's daily allowance, which is worse than one unconfirmed send. The server can surface
+`confirmed=false` separately; unknown fields are otherwise ignored.
+
+**3. No more forced re-login on every update.** The version-upgrade branch of `wipeStaleState()`
+wiped cookies and `WebStorage` ("fresh install"-like). With auto-update firing often, staff
+re-logged-in on every single version -- and worse, the lost cookie also broke the two native
+HTTP workers (`auth.requireAuth` rejects any `/crm/*` request without a session), so
+call-events silently piled up in the retry queue until someone logged back in. The actual
+complaint was stale *content*, and that's already handled on every launch by `clearCache()` +
+`LOAD_NO_CACHE`; killing the session was never needed for it. The upgrade branch now clears
+history and form data only.
+
 ## Planned next (not built yet)
 
+- **Foreground Service for the background workers.** `CallLogReporter` and `BulkSmsSender` are
+  both started and stopped by `MainActivity` (`onDestroy` stops them), so they only live as long
+  as the Activity does. Android will kill the Activity under memory pressure or after a long
+  screen-off, which strands an unattended bulk-SMS run part-way through. Moving both into a
+  foreground service (with its notification, channel, and `POST_NOTIFICATIONS` on Android 13+)
+  is the real fix. Deliberately kept out of v1.8 -- it's an architectural change and shipping it
+  alongside the data fixes above would make a staff-phone regression hard to attribute.
 - Idle-time-between-calls (gaps in the callEvents timeline) for the manager-side daily
   report -- computable from timestamps already being logged, no new tracking needed, just
   a report view.

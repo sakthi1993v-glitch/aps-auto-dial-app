@@ -29,8 +29,35 @@ object CallLogReporter {
     private const val QUEUE_KEY = "pending"
     private const val TAG = "CallLogReporter"
 
+    // Oru dial pannina number evlo nēram "indha app dial pannadhu" nu nyaabagam vaikkanum.
+    // Number match dhaan mukkiyamaana guard -- idhu thevai-illaadha pazhaya expectation-a
+    // (dial pannitu call nadakkaama pōna case) thooki podharukku mattum. Neenda call-um
+    // (call mudinja pinnadi dhaan report aagum) idhukkulla adangum.
+    private const val EXPECT_TTL_MS = 4 * 60 * 60 * 1000L
+
     private var listener: PhoneStateListener? = null
     private var wasOffHook = false
+
+    // 2026-08-08 (v1.8): munnadi call mudinja odane call log-la irukkura KADAISI entry-a
+    // eduthu CRM-ku anuppitu irundhom -- indha app dial pannadhaa illaya nu paakaama. Adhanaala
+    // staff-oda sondha outgoing call, veetla irundhu vandha incoming call, ellame lead-oda
+    // call-event-a CRM-la ratta aaguchu -> manager stats-la illaadha talk time theriyuchu.
+    // Ippo dial() ovvoru number-aiyum inga sollum, andha number-oda match aana call mattum
+    // report aagum.
+    @Volatile private var expectedNumber: String? = null
+    @Volatile private var expectedAtMs = 0L
+
+    /** MainActivity ACTION_CALL / ACTION_DIAL anuppura munnadi idha kooppidum. */
+    fun expectCall(number: String) {
+        expectedNumber = number
+        expectedAtMs = System.currentTimeMillis()
+        Log.i(TAG, "expectCall: ***${number.takeLast(4)}")
+    }
+
+    // Digits mattum, kadaisi 9. Call log "+91 98765 43210" nu kudukkum, CRM-la tel: link
+    // "9876543210" or "09876543210" nu irukkum -- adhanaala neraga string compare panna
+    // koodadhu, prefix/space/dash vidhyaasathula match miss aagidum.
+    private fun tail(number: String): String = number.filter { it.isDigit() }.takeLast(9)
 
     fun startListening(context: Context) {
         if (listener != null) return  // already listening -- avoid double-register
@@ -69,6 +96,18 @@ object CallLogReporter {
     }
 
     private fun reportLatestCall(context: Context) {
+        // v1.8: indha app dial panna call-a mattum report pannanum.
+        val expected = expectedNumber
+        if (expected == null) {
+            Log.i(TAG, "reportLatestCall: app dial pannina call illa (incoming / manual) -- skip")
+            return
+        }
+        if (System.currentTimeMillis() - expectedAtMs > EXPECT_TTL_MS) {
+            Log.i(TAG, "reportLatestCall: pazhaya expectation (>${EXPECT_TTL_MS / 3600000}h) -- skip")
+            expectedNumber = null
+            return
+        }
+
         try {
             val cursor = context.contentResolver.query(
                 CallLog.Calls.CONTENT_URI,
@@ -80,6 +119,22 @@ object CallLogReporter {
             cursor.use {
                 if (!it.moveToFirst()) return
                 val number = it.getString(it.getColumnIndexOrThrow(CallLog.Calls.NUMBER)) ?: return
+
+                // Kadaisi call log entry namma dial pannadhu illana -- naduvula oru incoming
+                // call vandhurukkum, illa staff native dialer-la vera number-ku pēsirukkum.
+                // Adha lead call-event-a anuppa koodadhu.
+                if (tail(number) != tail(expected)) {
+                    Log.i(
+                        TAG,
+                        "reportLatestCall: number match aagala (log ***${number.takeLast(4)}, " +
+                            "expected ***${expected.takeLast(4)}) -- skip"
+                    )
+                    return
+                }
+                // Indha call report aayiduchu -- adutha incoming/manual call idhē expectation-a
+                // marupadi use panniikka koodadhu.
+                expectedNumber = null
+
                 val durationSec = it.getInt(it.getColumnIndexOrThrow(CallLog.Calls.DURATION))
                 val type = it.getInt(it.getColumnIndexOrThrow(CallLog.Calls.TYPE))
                 // OUTGOING + duration>0 -> answered. MISSED/REJECTED/duration=0 -> not answered.

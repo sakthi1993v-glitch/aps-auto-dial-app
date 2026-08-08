@@ -13,7 +13,6 @@ import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
-import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -122,9 +121,18 @@ class MainActivity : ComponentActivity() {
     }
 
     // v1.3: pazhaya cache/state odave run aagakoodadhu.
-    // Ovvoru launch: HTTP cache clear + LOAD_NO_CACHE (page eppovum server fresh).
-    // Version upgrade first launch: WebStorage + cookies + history FULL wipe (fresh install
-    // madhiri) — appuram indha versionCode-a kurichi vachukkum, adutha launches normal.
+    // Ovvoru launch: HTTP cache clear + LOAD_NO_CACHE (page eppovum server-la irundhu fresh).
+    //
+    // 2026-08-08 (v1.8): munnadi version upgrade aana first launch-la cookies + WebStorage-um
+    // wipe pannitu irundhom ("fresh install madhiri"). Rendu prachanai:
+    //   1. Auto-update adikkadi varudhu -> staff OVVORU version-kkum marupadi login pannanum.
+    //   2. Cookie pōnadhunaala CallLogReporter / BulkSmsSender-oda native HTTP call-um auth
+    //      izhakkum (gateway-la auth.requireAuth cookie illaadha /crm/* request-a reject
+    //      pannum) -> update aana odane call-events queue-la sethukka aarambikkum, staff
+    //      marupadi login panra varaikkum.
+    // Nija prachanai stale *content*, adhu ovvoru launch-ilum nadakkura clearCache +
+    // LOAD_NO_CACHE-la ērkanave theerudhu -- adhukku login session-a azhikka thevaiye illa.
+    // Adhanaala upgrade-la ippo history + form data mattum clear.
     private fun wipeStaleState() {
         webView.clearCache(true)
         webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
@@ -134,10 +142,6 @@ class MainActivity : ComponentActivity() {
         if (lastVersion != BuildConfig.VERSION_CODE) {
             webView.clearHistory()
             webView.clearFormData()
-            WebStorage.getInstance().deleteAllData()
-            val cm = CookieManager.getInstance()
-            cm.removeAllCookies(null)
-            cm.flush()
             prefs.edit().putInt("lastVersionCode", BuildConfig.VERSION_CODE).apply()
         }
     }
@@ -223,6 +227,13 @@ class MainActivity : ComponentActivity() {
                 Toast.LENGTH_LONG
             ).show()
         }
+        // v1.8: indha number-a CallLogReporter-kku munnadiye sollirom. Call mudinja pinnadi
+        // adhu call log-la irukkura kadaisi entry-oda number-a idhoda match panni paakkum --
+        // match aana mattum CRM-ku call-event anuppum. Illaati staff-oda personal call /
+        // incoming call ellame lead call-event-a pōyiduchu (v1.8 fix).
+        // ACTION_DIAL fallback-kum sollanum -- appovum staff andha lead-ku dhaan pēsuvaanga.
+        CallLogReporter.expectCall(phoneNumber)
+
         // Permission irundha ACTION_CALL -- neraga dial aagum (0-tap). Illana ACTION_DIAL --
         // dialer open aagum, staff 1-tap pannanum (permission kudukkura varaikkum fallback).
         val action = if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL
