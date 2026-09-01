@@ -31,6 +31,23 @@
             </intent-filter>
         </activity>
 
+        <!-- 2026-09: second launcher icon (same APK, same MainActivity, same permissions) --
+             students get their own home-screen icon that opens /student/login instead of the
+             staff CRM root. No new Activity: MainActivity reads intent.component to see which
+             alias it was launched through, and picks the URL from that. -->
+        <activity-alias
+            android:name=".StudentEntry"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:label="@string/app_name_student">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- Downloaded APK file:// URIs need a content:// FileProvider on Android 7+ before
              they can be passed to the package installer intent. -->
         <provider
