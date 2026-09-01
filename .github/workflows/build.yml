@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed for the release step below (gh release create)
     steps:
       - uses: actions/checkout@v4
 
@@ -64,3 +66,25 @@ jobs:
         with:
           name: aps-auto-dial-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # 2026-09: publish a GitHub Release for every push to main, tagged from version.json's
+      # versionName (matches the existing vX.Y-debug convention) -- this is what the in-app
+      # UpdateChecker's apkUrl points at, so a version.json bump with no matching release would
+      # leave the update prompt downloading a 404. Only push-to-main (not workflow_dispatch
+      # from a branch) creates a release, and it's idempotent: an already-existing tag is left
+      # alone so re-running this workflow never fails or duplicates a release.
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION_NAME=$(node -p "require('./version.json').versionName")
+          TAG="v${VERSION_NAME}-debug"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skipping."
+          else
+            gh release create "$TAG" app/build/outputs/apk/debug/app-debug.apk \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "v${VERSION_NAME} debug build" \
+              --notes "Automated build from commit ${{ github.sha }}."
+          fi
