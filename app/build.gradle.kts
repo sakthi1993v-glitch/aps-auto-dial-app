@@ -11,8 +11,8 @@ android {
         applicationId = "com.apsconnect.autodial"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 9
+        versionName = "1.8"
     }
 
     // 2026-08-07 -- THE UPDATE-LOOP FIX. Read this before touching it.
