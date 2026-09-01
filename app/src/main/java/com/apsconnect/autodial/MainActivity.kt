@@ -33,7 +33,15 @@ import androidx.core.content.ContextCompat
 // normal tel: behaviour (which needs one tap on the dialer's own call button).
 class MainActivity : ComponentActivity() {
 
-    private val crmUrl = "https://agent.adiparasakthicharitabletrust.in"
+    private val crmBase = "https://agent.adiparasakthicharitabletrust.in"
+    // 2026-09: launched via the "APS Student" home-screen icon (.StudentEntry alias in the
+    // manifest, same MainActivity) vs the regular "APS Auto Dial" (staff) icon -- intent's
+    // component name reflects WHICH launcher icon was tapped, even though both resolve to
+    // this same Activity, so this is enough to route without a second Activity/APK.
+    private val isStudentEntry: Boolean
+        get() = intent?.component?.shortClassName == ".StudentEntry"
+    private val crmUrl: String
+        get() = if (isStudentEntry) "$crmBase/student/login" else crmBase
     private val callPermissionRequestCode = 100
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
@@ -124,7 +132,9 @@ class MainActivity : ComponentActivity() {
             webView.loadUrl(crmUrl)
         }
 
-        requestCallPermissionIfNeeded()
+        // Auto-dial, call-log tracking and Bulk SMS are staff-only features -- a student has
+        // no reason to be asked for CALL_PHONE/SMS/call-log permissions at all.
+        if (!isStudentEntry) requestCallPermissionIfNeeded()
         UpdateChecker.checkForUpdate(this)
     }
 
@@ -140,8 +150,10 @@ class MainActivity : ComponentActivity() {
     // grant it via Settings and switch back -- no app restart needed.
     override fun onResume() {
         super.onResume()
-        startBackgroundWorkers()
-        updatePermissionBanner()
+        if (!isStudentEntry) {
+            startBackgroundWorkers()
+            updatePermissionBanner()
+        }
     }
 
     private fun buildPermissionBanner(): View {
@@ -292,6 +304,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun dial(phoneNumber: String) {
+        // Students never requested CALL_PHONE (0-tap auto-dial is a staff-only feature) --
+        // straight to the normal dialer, no "permission illa" toast that means nothing to them.
+        if (isStudentEntry) {
+            startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneNumber")))
+            return
+        }
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
             PackageManager.PERMISSION_GRANTED
         if (!granted) {
