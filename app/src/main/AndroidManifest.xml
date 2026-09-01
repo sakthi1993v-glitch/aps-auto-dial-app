@@ -31,8 +31,8 @@
             </intent-filter>
         </activity>
 
-        <!-- 2026-09: second launcher icon (same APK, same MainActivity, same permissions) --
-             students get their own home-screen icon that opens /student/login instead of the
+        <!-- 2026-09: second launcher icon (same APK, same MainActivity, same permissions).
+             Students get their own home-screen icon that opens /student/login instead of the
              staff CRM root. No new Activity: MainActivity reads intent.component to see which
              alias it was launched through, and picks the URL from that. -->
         <activity-alias
