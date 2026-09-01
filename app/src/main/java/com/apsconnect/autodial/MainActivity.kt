@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -37,6 +38,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
     private lateinit var errorView: View
+    private lateinit var permissionBanner: View
+    private lateinit var permissionBannerText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,9 +65,13 @@ class MainActivity : ComponentActivity() {
         errorView = buildErrorView()
         errorView.visibility = View.GONE
 
+        permissionBanner = buildPermissionBanner()
+        permissionBanner.visibility = View.GONE
+
         root.addView(webView)
         root.addView(progressBar)
         root.addView(errorView)
+        root.addView(permissionBanner)
         setContentView(root)
 
         // Session cookie (staff/manager login) persist aaganum na cookie accept explicit-a
@@ -119,6 +126,74 @@ class MainActivity : ComponentActivity() {
 
         requestCallPermissionIfNeeded()
         UpdateChecker.checkForUpdate(this)
+    }
+
+    // 2026-09: on Android 13+, an app installed by sideload (APK download, not Play Store) has
+    // SEND_SMS / READ_CALL_LOG / READ_PHONE_STATE marked "restricted" -- the in-app permission
+    // dialog either never shows for them or tapping Allow silently does nothing, and the
+    // Settings toggle stays greyed out until staff open App info -> (top-right) -> "Allow
+    // restricted settings" first. There is no API to lift this from code (it's an Android anti-
+    // malware guard), so requestCallPermissionIfNeeded() alone can leave call-log tracking and
+    // Bulk SMS permanently silent with staff never knowing why. This banner is the fix: it
+    // stays visible with exact steps whenever either permission group is still missing, and
+    // onResume() re-checks so the banner disappears (and the worker starts) the moment staff
+    // grant it via Settings and switch back -- no app restart needed.
+    override fun onResume() {
+        super.onResume()
+        startBackgroundWorkers()
+        updatePermissionBanner()
+    }
+
+    private fun buildPermissionBanner(): View {
+        val bar = android.widget.LinearLayout(this)
+        bar.orientation = android.widget.LinearLayout.VERTICAL
+        bar.setBackgroundColor(Color.parseColor("#FFF3CD"))
+        bar.setPadding(24, 20, 24, 20)
+        val params = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        params.gravity = Gravity.TOP
+        bar.layoutParams = params
+
+        permissionBannerText = TextView(this)
+        permissionBannerText.setTextColor(Color.parseColor("#664D03"))
+        permissionBannerText.textSize = 13f
+
+        val fixBtn = Button(this)
+        fixBtn.text = "Settings-ku po, fix pannunga"
+        fixBtn.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+            })
+        }
+
+        bar.addView(permissionBannerText)
+        bar.addView(fixBtn)
+        return bar
+    }
+
+    // Call-log tracking (READ_PHONE_STATE + READ_CALL_LOG) and Bulk SMS (SEND_SMS) each have
+    // their own worker, so the banner names exactly which one is broken -- staff shouldn't be
+    // told to "fix permissions" for a feature that's already working.
+    private fun updatePermissionBanner() {
+        val granted = { p: String -> ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED }
+        val callLogMissing = !granted(Manifest.permission.READ_PHONE_STATE) || !granted(Manifest.permission.READ_CALL_LOG)
+        val smsMissing = !granted(Manifest.permission.SEND_SMS)
+
+        if (!callLogMissing && !smsMissing) {
+            permissionBanner.visibility = View.GONE
+            return
+        }
+
+        val broken = mutableListOf<String>()
+        if (callLogMissing) broken.add("Call duration tracking")
+        if (smsMissing) broken.add("Bulk SMS")
+
+        permissionBannerText.text =
+            "${broken.joinToString(" & ")} work aagala -- permission illa.\n" +
+            "Settings > Apps > APS Connect > ⋮ (top-right) > \"Allow restricted settings\" " +
+            "adhukku appuram Permissions-la Call logs / Phone / SMS-a Allow pannunga."
+        permissionBanner.visibility = View.VISIBLE
     }
 
     // v1.3: pazhaya cache/state odave run aagakoodadhu.
@@ -210,7 +285,10 @@ class MainActivity : ComponentActivity() {
         requestCode: Int, permissions: Array<String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == callPermissionRequestCode) startBackgroundWorkers()
+        if (requestCode == callPermissionRequestCode) {
+            startBackgroundWorkers()
+            updatePermissionBanner()
+        }
     }
 
     private fun dial(phoneNumber: String) {
