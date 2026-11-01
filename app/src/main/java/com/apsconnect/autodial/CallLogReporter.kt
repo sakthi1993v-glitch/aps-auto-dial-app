@@ -37,9 +37,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 // 2026-11 (v1.9) CALL-REPORT CONTRACT -- reports ALL phone calls (not just answered/dialled
 // ones) so managers get per-staff call reports (calls, missed, minutes, per number, lead vs
 // non-lead).
-//   POST https://agent.adiparasakthicharitabletrust.in/crm/api/leads/call-event
+//   POST https://agent.adiparasakthicharitabletrust.in/crm/api/leads/call-events  {events:[<=200 x]}
 //   (same WebView-cookie auth, same local retry queue)
-//   JSON: { phone, durationSec, answered, type, at, eventId }
+//   each event: { phone, durationSec, answered, type, at, eventId }
 //     type     = "outgoing" | "incoming" | "missed" | "rejected" | "other"
 //     at       = ISO-8601 UTC of CallLog.Calls.DATE (real call time). The server rejects 'at'
 //                older than ~3 days, so we never read further back than that.
@@ -55,7 +55,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 // ~1.5 s and ~6 s), app start/resume, and every 15 min while the app process is alive.
 object CallLogReporter {
 
-    private const val CALL_EVENT_URL = "https://agent.adiparasakthicharitabletrust.in/crm/api/leads/call-event"
+    private const val CALL_EVENT_URL = "https://agent.adiparasakthicharitabletrust.in/crm/api/leads/call-events"
     private const val PREFS = "call_event_queue"
     private const val QUEUE_KEY = "pending"
     private const val CURSOR_KEY = "sync_cursor_date"
@@ -63,6 +63,7 @@ object CallLogReporter {
     private const val TAG = "CallLogReporter"
     private const val MAX_AGE_MS = 3L * 24 * 60 * 60 * 1000   // server rejects older 'at'
     private const val MAX_ROWS_PER_RUN = 200
+    private const val MAX_BATCH = 200   // server accepts 1..200 events per call-events POST
     private const val MAX_QUEUE = 500
     private const val PERIODIC_MS = 15L * 60 * 1000
     private const val ISO_FMT = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
@@ -219,6 +220,7 @@ object CallLogReporter {
         var firstDate = -1L
         var capped = false
         val seen = HashSet<String>()
+        val batch = ArrayList<JSONObject>()
         cursor.use {
             val iId = it.getColumnIndexOrThrow(CallLog.Calls._ID)
             val iNum = it.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
@@ -242,13 +244,17 @@ object CallLogReporter {
                     val type = typeName(it.getInt(iType))
                     val answered = (type == "outgoing" || type == "incoming") && dur > 0
                     val ev = eventJson(number, dur, answered, type, date, eventId)
-                    // OK = done, DROP = server will never accept it (not queued), RETRY = queue.
-                    if (sendOne(ev) == Send.RETRY) enqueue(context, ev)
+                    batch.add(ev)
                     processed++
                 }
                 if (date > maxDate) maxDate = date
                 if (id > maxId) maxId = id
             }
+        }
+        // ONE batch POST per run (chunks of <=200). OK/DROP = handled; RETRY = queue the chunk.
+        // Re-sending after an uncertain failure is safe: the server dedupes per staff+eventId.
+        for (chunk in batch.chunked(MAX_BATCH)) {
+            if (sendBatch(chunk) == Send.RETRY) for (ev in chunk) enqueue(context, ev)
         }
         // Stopped at the cap: step the date cursor back 1 ms so rows sharing the last
         // millisecond are re-read next run (idempotent via eventId). Only when the whole
@@ -273,7 +279,12 @@ object CallLogReporter {
     // OK = server accepted (2xx). DROP = permanent rejection (400/403/404/409/422 and any other
     // 4xx not listed as retryable) -- retrying can never help, so never queue it. RETRY =
     // network error, 401 (session cookie expired), 408, 429, 5xx -- caller queues it.
-    private fun sendOne(event: JSONObject): Send {
+    // Batch POST {events:[...]}. The server answers 200 {results:[{error}|{matched,..}],accepted,
+    // rejected}; a per-event "error" means that event is invalid for good (bad phone), never
+    // worth retrying, so any 2xx = the whole batch is handled.
+    private fun sendBatch(events: List<JSONObject>): Send {
+        if (events.isEmpty()) return Send.OK
+        val payload = JSONObject().put("events", JSONArray(events))
         return try {
             val url = URL(CALL_EVENT_URL)
             val conn = url.openConnection() as HttpURLConnection
@@ -285,28 +296,28 @@ object CallLogReporter {
             val cookie = CookieManager.getInstance().getCookie("https://agent.adiparasakthicharitabletrust.in")
             if (cookie != null) conn.setRequestProperty("Cookie", cookie)
             conn.connectTimeout = 8000
-            conn.readTimeout = 8000
-            conn.outputStream.use { it.write(event.toString().toByteArray()) }
+            conn.readTimeout = 20000
+            conn.outputStream.use { it.write(payload.toString().toByteArray()) }
             val code = conn.responseCode
             if (code in 200..299) conn.inputStream.use { it.readBytes() } else conn.errorStream?.use { it.readBytes() }
             conn.disconnect()
             when {
                 code in 200..299 -> Send.OK
                 code == 401 || code == 408 || code == 429 || code >= 500 -> {
-                    Log.w(TAG, "sendOne: retryable, code=$code")
+                    Log.w(TAG, "sendBatch: retryable, code=$code")
                     Send.RETRY
                 }
                 code in 400..499 -> {
-                    Log.w(TAG, "sendOne: dropped, code=$code")
+                    Log.w(TAG, "sendBatch: dropped, code=$code")
                     Send.DROP
                 }
                 else -> {
-                    Log.w(TAG, "sendOne: unexpected code=$code")
+                    Log.w(TAG, "sendBatch: unexpected code=$code")
                     Send.RETRY
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "sendOne: network error", e)
+            Log.e(TAG, "sendBatch: network error", e)
             Send.RETRY
         }
     }
@@ -348,7 +359,7 @@ object CallLogReporter {
                     val cutoff = System.currentTimeMillis() - MAX_AGE_MS
                     val fmt = isoFormat()
                     val finished = HashSet<String>()   // JSON strings to remove from the queue
-                    var stop = false
+                    val valid = ArrayList<JSONObject>()
                     for (k in 0 until snapshot.length()) {
                         val ev = snapshot.optJSONObject(k) ?: continue
                         val key = ev.toString()
@@ -358,11 +369,12 @@ object CallLogReporter {
                             finished.add(key)   // legacy or expired
                             continue
                         }
-                        if (stop) continue
-                        when (sendOne(ev)) {
-                            Send.OK, Send.DROP -> finished.add(key)
-                            Send.RETRY -> stop = true
-                        }
+                        valid.add(ev)
+                    }
+                    // Send in order, in batches; stop at the first batch that needs a retry.
+                    for (chunk in valid.chunked(MAX_BATCH)) {
+                        if (sendBatch(chunk) == Send.RETRY) break
+                        for (ev in chunk) finished.add(ev.toString())   // OK or DROP
                     }
                     synchronized(queueLock) {
                         val current = readQueue(prefs)
