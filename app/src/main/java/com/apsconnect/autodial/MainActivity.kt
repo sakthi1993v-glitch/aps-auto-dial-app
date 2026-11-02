@@ -48,6 +48,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var errorView: View
     private lateinit var permissionBanner: View
     private lateinit var permissionBannerText: TextView
+    private lateinit var simBar: View
+    private lateinit var simBarText: TextView
+    private var simDialog: android.app.AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,6 +83,9 @@ class MainActivity : ComponentActivity() {
         root.addView(progressBar)
         root.addView(errorView)
         root.addView(permissionBanner)
+        simBar = buildSimBar()
+        simBar.visibility = View.GONE
+        root.addView(simBar)
         setContentView(root)
 
         // Session cookie (staff/manager login) persist aaganum na cookie accept explicit-a
@@ -153,7 +159,84 @@ class MainActivity : ComponentActivity() {
         if (!isStudentEntry) {
             startBackgroundWorkers()
             updatePermissionBanner()
+            updateSimBar()
         }
+    }
+
+    // v1.10 Office SIM: small strip at the bottom showing which SIM is counted + a Change button.
+    // Several SIMs and no choice yet -> the chooser opens by itself (nothing is uploaded until then).
+    private fun buildSimBar(): View {
+        val bar = android.widget.LinearLayout(this)
+        bar.orientation = android.widget.LinearLayout.HORIZONTAL
+        bar.gravity = Gravity.CENTER_VERTICAL
+        bar.setBackgroundColor(Color.parseColor("#E7F1FF"))
+        bar.setPadding(24, 8, 24, 8)
+        val params = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        params.gravity = Gravity.BOTTOM
+        bar.layoutParams = params
+
+        simBarText = TextView(this)
+        simBarText.setTextColor(Color.parseColor("#084298"))
+        simBarText.textSize = 12f
+        simBarText.layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+
+        val changeBtn = Button(this)
+        changeBtn.text = "Change"
+        changeBtn.setOnClickListener { showSimChooser() }
+
+        bar.addView(simBarText)
+        bar.addView(changeBtn)
+        return bar
+    }
+
+    private fun updateSimBar() {
+        if (isStudentEntry) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) !=
+            PackageManager.PERMISSION_GRANTED) {
+            simBar.visibility = View.GONE
+            return
+        }
+        when (val st = OfficeSim.state(this)) {
+            is OfficeSim.State.Unknown -> simBar.visibility = View.GONE
+            is OfficeSim.State.Ready -> {
+                val sim = st.sim
+                if (sim == null) {
+                    simBarText.text = "Office SIM select pannala -- calls report aagathu"
+                    simBar.visibility = View.VISIBLE
+                    showSimChooser()
+                } else {
+                    simBarText.text = "Office SIM: ${sim.maskedLabel}"
+                    simBar.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    private fun showSimChooser() {
+        if (simDialog?.isShowing == true || isFinishing) return
+        val sims = OfficeSim.activeSims(this)
+        if (sims.isEmpty()) {
+            Toast.makeText(this, "SIM details padikka mudiyala (Phone permission check pannunga)", Toast.LENGTH_LONG).show()
+            return
+        }
+        val current = OfficeSim.chosen(this, sims)
+        var picked = sims.indexOfFirst { it.subId == current?.subId }
+        val dlg = android.app.AlertDialog.Builder(this)
+            .setTitle("Office SIM-a select pannunga")
+            .setSingleChoiceItems(sims.map { it.maskedLabel }.toTypedArray(), picked) { _, which -> picked = which }
+            .setPositiveButton("Save") { _, _ ->
+                if (picked >= 0) {
+                    OfficeSim.choose(this, sims[picked])
+                    CallLogReporter.syncCallLog(this)   // upload the office-SIM calls held back until now
+                }
+                updateSimBar()
+            }
+            .setNegativeButton("Later", null)
+            .create()
+        simDialog = dlg
+        dlg.show()
     }
 
     private fun buildPermissionBanner(): View {
@@ -300,6 +383,7 @@ class MainActivity : ComponentActivity() {
         if (requestCode == callPermissionRequestCode) {
             startBackgroundWorkers()
             updatePermissionBanner()
+            updateSimBar()
         }
     }
 
@@ -322,7 +406,19 @@ class MainActivity : ComponentActivity() {
         // Permission irundha ACTION_CALL -- neraga dial aagum (0-tap). Illana ACTION_DIAL --
         // dialer open aagum, staff 1-tap pannanum (permission kudukkura varaikkum fallback).
         val action = if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL
-        startActivity(Intent(action, Uri.parse("tel:$phoneNumber")))
+        val callIntent = Intent(action, Uri.parse("tel:$phoneNumber"))
+        // v1.10: place the call from the chosen office SIM when it is known (2+ SIMs); any
+        // failure falls back to the phone's default SIM behaviour.
+        if (granted) {
+            try {
+                OfficeSim.chosenHandle(this)?.let {
+                    callIntent.putExtra(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("OfficeSim", "dial: SIM handle skipped: ${e.message}")
+            }
+        }
+        startActivity(callIntent)
     }
 
     // v1.5 (2026-08-06): back button azhuthina UDANE app veliya pōyiduchu -- staff oru lead

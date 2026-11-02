@@ -197,6 +197,18 @@ object CallLogReporter {
     }
 
     private fun syncOnce(context: Context) {
+        // v1.10 office-SIM gate. Unknown (cannot list SIMs) = no filtering, as before. Several
+        // active SIMs and none chosen yet = upload NOTHING and leave the cursor untouched (the
+        // app shows the chooser); the calls of the last 3 days are then picked up after the choice.
+        val simState = OfficeSim.state(context)
+        if (simState is OfficeSim.State.Ready && simState.multi && simState.sim == null) {
+            Log.i(TAG, "syncCallLog: waiting for office SIM choice")
+            return
+        }
+        val chosenSim: OfficeSim.Sim? = (simState as? OfficeSim.State.Ready)?.sim
+        val activeSims: List<OfficeSim.Sim> =
+            if (simState is OfficeSim.State.Ready) OfficeSim.activeSims(context) else emptyList()
+        val multiSim = activeSims.size > 1
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val floor = System.currentTimeMillis() - MAX_AGE_MS + 60_000   // margin vs server clock
         val cursorDate = prefs.getLong(CURSOR_KEY, 0L)
@@ -207,7 +219,7 @@ object CallLogReporter {
         val cursor = context.contentResolver.query(
             CallLog.Calls.CONTENT_URI,
             arrayOf(CallLog.Calls._ID, CallLog.Calls.NUMBER, CallLog.Calls.DURATION,
-                CallLog.Calls.TYPE, CallLog.Calls.DATE),
+                CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.PHONE_ACCOUNT_ID),
             "${CallLog.Calls.DATE} > ? AND (${CallLog.Calls.DATE} > ? OR ${CallLog.Calls._ID} > ?)",
             arrayOf(floor.toString(), cursorDate.toString(), lastId.toString()),
             "${CallLog.Calls.DATE} ASC"
@@ -227,6 +239,7 @@ object CallLogReporter {
             val iDur = it.getColumnIndexOrThrow(CallLog.Calls.DURATION)
             val iType = it.getColumnIndexOrThrow(CallLog.Calls.TYPE)
             val iDate = it.getColumnIndexOrThrow(CallLog.Calls.DATE)
+            val iAcct = it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_ID)   // -1 if the OEM lacks it
             while (it.moveToNext()) {
                 if (rows >= MAX_ROWS_PER_RUN) {
                     capped = true
@@ -239,11 +252,22 @@ object CallLogReporter {
                 val number = it.getString(iNum)
                 val eventId = "$id-$date"
                 // Private/unknown numbers can't be attributed -> skipped (cursor still moves).
-                if (!number.isNullOrBlank() && seen.add(eventId)) {
+                // Office-SIM filter: only the chosen SIM's rows. Other SIMs are skipped (cursor
+                // still moves); an undeterminable SIM is skipped when 2+ SIMs are active.
+                var simOk = true
+                if (chosenSim != null && multiSim) {
+                    val acct = if (iAcct >= 0) it.getString(iAcct) else null
+                    simOk = OfficeSim.classify(acct, chosenSim, activeSims) == OfficeSim.Match.CHOSEN
+                }
+                if (simOk && !number.isNullOrBlank() && seen.add(eventId)) {
                     val dur = it.getInt(iDur)
                     val type = typeName(it.getInt(iType))
                     val answered = (type == "outgoing" || type == "incoming") && dur > 0
                     val ev = eventJson(number, dur, answered, type, date, eventId)
+                    if (chosenSim != null) {   // optional fields; never the SIM's own number
+                        ev.put("simSlot", chosenSim.slot)
+                        ev.put("simCarrier", chosenSim.carrier.take(30))
+                    }
                     batch.add(ev)
                     processed++
                 }
