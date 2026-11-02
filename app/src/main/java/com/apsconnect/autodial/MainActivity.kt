@@ -197,7 +197,12 @@ class MainActivity : ComponentActivity() {
         return bar
     }
 
+    // The blue "Office SIM: ..." strip is only a confirmation: it hides itself 5 s after it appears (owner: it stayed at the
+    // bottom after Save). Warnings (red) stay until the problem is fixed. It shows again for 5 s on every app open.
+    private val simBarHideRunnable = Runnable { simBar.visibility = View.GONE }
+
     private fun showSimWarning(text: String, withChange: Boolean) {
+        simBar.removeCallbacks(simBarHideRunnable)
         simBar.setBackgroundColor(Color.parseColor("#F8D7DA"))
         simBarText.setTextColor(Color.parseColor("#842029"))
         simBarText.text = text
@@ -211,6 +216,8 @@ class MainActivity : ComponentActivity() {
         simBarText.text = text
         simBar.visibility = View.VISIBLE
         (simBar as ViewGroup).getChildAt(1).visibility = View.VISIBLE
+        simBar.removeCallbacks(simBarHideRunnable)
+        simBar.postDelayed(simBarHideRunnable, 5000)
     }
 
     private fun updateSimBar() {
@@ -224,7 +231,7 @@ class MainActivity : ComponentActivity() {
                     (if (callPhoneGranted) " (auto-dial default SIM-la pogum)" else ""), false)
             OfficeSim.Status.UNAVAILABLE ->
                 if (snap.hold) showSimWarning("SIM list padikka mudiyala -- calls hold-la irukku, admin-kitta sollunga", false)
-                else simBar.visibility = View.GONE
+                else { simBar.removeCallbacks(simBarHideRunnable); simBar.visibility = View.GONE }
             OfficeSim.Status.NEED_CHOICE -> {
                 showSimWarning((snap.note ?: "Office SIM select pannala") + " -- calls report aagathu", true)
                 if (!OfficeSim.snoozed(this)) showSimChooser()
@@ -479,6 +486,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        simBar.removeCallbacks(simBarHideRunnable)
         simDialog?.dismiss()
         simDialog = null
         CallLogReporter.stopListening(this)
