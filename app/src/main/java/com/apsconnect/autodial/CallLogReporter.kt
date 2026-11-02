@@ -197,6 +197,16 @@ object CallLogReporter {
     }
 
     private fun syncOnce(context: Context) {
+        // v1.10 office-SIM gate: ONE snapshot per sync. hold = upload nothing and leave the
+        // cursor untouched (SIM choice missing, deliberate choice unreadable/vanished); the last
+        // 3 days are then picked up after the staff fix it. Single SIM / SIM list unreadable
+        // without a deliberate choice = no filtering, exactly like v1.9.
+        val snap = OfficeSim.snapshot(context)
+        if (snap.hold) {
+            Log.i(TAG, "syncCallLog: holding (SIM status ${snap.status})")
+            return
+        }
+        val filtering = snap.filtering
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val floor = System.currentTimeMillis() - MAX_AGE_MS + 60_000   // margin vs server clock
         val cursorDate = prefs.getLong(CURSOR_KEY, 0L)
@@ -204,14 +214,32 @@ object CallLogReporter {
         // DATE is the call START, but the row is inserted when the call ENDS: a long call can
         // appear after a later short call already moved the date cursor. So also select rows
         // with _ID > lastId (ids only grow). No LIMIT in sortOrder: it throws on Android 11+.
-        val cursor = context.contentResolver.query(
-            CallLog.Calls.CONTENT_URI,
-            arrayOf(CallLog.Calls._ID, CallLog.Calls.NUMBER, CallLog.Calls.DURATION,
-                CallLog.Calls.TYPE, CallLog.Calls.DATE),
-            "${CallLog.Calls.DATE} > ? AND (${CallLog.Calls.DATE} > ? OR ${CallLog.Calls._ID} > ?)",
-            arrayOf(floor.toString(), cursorDate.toString(), lastId.toString()),
-            "${CallLog.Calls.DATE} ASC"
-        ) ?: return
+        val baseCols = arrayOf(CallLog.Calls._ID, CallLog.Calls.NUMBER, CallLog.Calls.DURATION,
+            CallLog.Calls.TYPE, CallLog.Calls.DATE)
+        val sel = "${CallLog.Calls.DATE} > ? AND (${CallLog.Calls.DATE} > ? OR ${CallLog.Calls._ID} > ?)"
+        val selArgs = arrayOf(floor.toString(), cursorDate.toString(), lastId.toString())
+        val order = "${CallLog.Calls.DATE} ASC"
+        // The SIM columns are only requested when we must filter; if the provider rejects them
+        // the query is retried without, so single-SIM phones behave exactly like v1.9.
+        var withSimCols = filtering
+        var cursor = try {
+            if (filtering) {
+                context.contentResolver.query(CallLog.Calls.CONTENT_URI,
+                    baseCols + arrayOf(CallLog.Calls.PHONE_ACCOUNT_ID, CallLog.Calls.PHONE_ACCOUNT_COMPONENT_NAME),
+                    sel, selArgs, order)
+            } else {
+                context.contentResolver.query(CallLog.Calls.CONTENT_URI, baseCols, sel, selArgs, order)
+            }
+        } catch (e: IllegalArgumentException) {
+            null
+        } catch (e: android.database.sqlite.SQLiteException) {
+            null
+        }
+        if (cursor == null && filtering) {
+            withSimCols = false
+            cursor = context.contentResolver.query(CallLog.Calls.CONTENT_URI, baseCols, sel, selArgs, order)
+        }
+        if (cursor == null) return
 
         var rows = 0
         var processed = 0
@@ -219,24 +247,50 @@ object CallLogReporter {
         var maxId = lastId
         var firstDate = -1L
         var capped = false
+        var heldUnknown = false
         val seen = HashSet<String>()
         val batch = ArrayList<JSONObject>()
+        val chosen = snap.chosen
         cursor.use {
             val iId = it.getColumnIndexOrThrow(CallLog.Calls._ID)
             val iNum = it.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
             val iDur = it.getColumnIndexOrThrow(CallLog.Calls.DURATION)
             val iType = it.getColumnIndexOrThrow(CallLog.Calls.TYPE)
             val iDate = it.getColumnIndexOrThrow(CallLog.Calls.DATE)
+            val iAcct = if (withSimCols) it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_ID) else -1
+            val iComp = if (withSimCols) it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_COMPONENT_NAME) else -1
             while (it.moveToNext()) {
                 if (rows >= MAX_ROWS_PER_RUN) {
                     capped = true
                     break
                 }
-                rows++
                 val date = it.getLong(iDate)
                 val id = it.getLong(iId)
-                if (firstDate < 0) firstDate = date
                 val number = it.getString(iNum)
+                // Office-SIM filter (2+ SIMs): CHOSEN = upload, OTHER = skip (cursor moves on),
+                // UNKNOWN = never upload and never skip: hold right before this row.
+                if (filtering) {
+                    val acct = if (iAcct >= 0) it.getString(iAcct) else null
+                    val comp = if (iComp >= 0) it.getString(iComp) else null
+                    // A call this app dialled itself with the chosen SIM's handle teaches us the id.
+                    val learnedNow = it.getInt(iType) == CallLog.Calls.OUTGOING_TYPE &&
+                        OfficeSim.learnFromRow(context, number, date, acct, comp)
+                    val m = if (learnedNow) OfficeSim.Match.CHOSEN else OfficeSim.classify(acct, comp, snap)
+                    if (m == OfficeSim.Match.UNKNOWN) {
+                        heldUnknown = true
+                        if (date - 1 < maxDate) maxDate = date - 1
+                        break
+                    }
+                    if (m == OfficeSim.Match.OTHER) {
+                        rows++
+                        if (firstDate < 0) firstDate = date
+                        if (date > maxDate) maxDate = date
+                        if (id > maxId) maxId = id
+                        continue
+                    }
+                }
+                rows++
+                if (firstDate < 0) firstDate = date
                 val eventId = "$id-$date"
                 // Private/unknown numbers can't be attributed -> skipped (cursor still moves).
                 if (!number.isNullOrBlank() && seen.add(eventId)) {
@@ -244,6 +298,10 @@ object CallLogReporter {
                     val type = typeName(it.getInt(iType))
                     val answered = (type == "outgoing" || type == "incoming") && dur > 0
                     val ev = eventJson(number, dur, answered, type, date, eventId)
+                    if (chosen != null) {   // optional fields; never the SIM's own number
+                        OfficeSim.slotForServer(chosen)?.let { s -> ev.put("simSlot", s) }
+                        ev.put("simCarrier", chosen.carrier.take(30))
+                    }
                     batch.add(ev)
                     processed++
                 }
@@ -251,6 +309,7 @@ object CallLogReporter {
                 if (id > maxId) maxId = id
             }
         }
+        OfficeSim.setUnknownHold(context, heldUnknown)
         // ONE batch POST per run (chunks of <=200). OK/DROP = handled; RETRY = queue the chunk.
         // Re-sending after an uncertain failure is safe: the server dedupes per staff+eventId.
         for (chunk in batch.chunked(MAX_BATCH)) {
