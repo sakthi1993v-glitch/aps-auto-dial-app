@@ -85,8 +85,15 @@ class MainActivity : ComponentActivity() {
         root.addView(permissionBanner)
         simBar = buildSimBar()
         simBar.visibility = View.GONE
-        root.addView(simBar)
-        setContentView(root)
+        // WebView area takes all remaining height; the SIM strip sits BELOW it (no overlay).
+        val outer = android.widget.LinearLayout(this)
+        outer.orientation = android.widget.LinearLayout.VERTICAL
+        root.layoutParams = android.widget.LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        )
+        outer.addView(root)
+        outer.addView(simBar)
+        setContentView(outer)
 
         // Session cookie (staff/manager login) persist aaganum na cookie accept explicit-a
         // ON pannanum — illana login pannina odane veetiyum login screen-kku thirumba pogum.
@@ -163,22 +170,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // v1.10 Office SIM: small strip at the bottom showing which SIM is counted + a Change button.
-    // Several SIMs and no choice yet -> the chooser opens by itself (nothing is uploaded until then).
+    // v1.10 Office SIM: strip BELOW the WebView (never overlays the CRM page) showing which SIM is
+    // counted + Change, or a visible warning when calls cannot be matched / are being held.
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
     private fun buildSimBar(): View {
         val bar = android.widget.LinearLayout(this)
         bar.orientation = android.widget.LinearLayout.HORIZONTAL
         bar.gravity = Gravity.CENTER_VERTICAL
         bar.setBackgroundColor(Color.parseColor("#E7F1FF"))
-        bar.setPadding(24, 8, 24, 8)
-        val params = FrameLayout.LayoutParams(
+        bar.setPadding(dp(12), dp(4), dp(12), dp(4))
+        bar.layoutParams = android.widget.LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         )
-        params.gravity = Gravity.BOTTOM
-        bar.layoutParams = params
 
         simBarText = TextView(this)
-        simBarText.setTextColor(Color.parseColor("#084298"))
         simBarText.textSize = 12f
         simBarText.layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
 
@@ -191,41 +197,66 @@ class MainActivity : ComponentActivity() {
         return bar
     }
 
+    private fun showSimWarning(text: String, withChange: Boolean) {
+        simBar.setBackgroundColor(Color.parseColor("#F8D7DA"))
+        simBarText.setTextColor(Color.parseColor("#842029"))
+        simBarText.text = text
+        simBar.visibility = View.VISIBLE
+        (simBar as ViewGroup).getChildAt(1).visibility = if (withChange) View.VISIBLE else View.GONE
+    }
+
+    private fun showSimInfo(text: String) {
+        simBar.setBackgroundColor(Color.parseColor("#E7F1FF"))
+        simBarText.setTextColor(Color.parseColor("#084298"))
+        simBarText.text = text
+        simBar.visibility = View.VISIBLE
+        (simBar as ViewGroup).getChildAt(1).visibility = View.VISIBLE
+    }
+
     private fun updateSimBar() {
         if (isStudentEntry) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) !=
-            PackageManager.PERMISSION_GRANTED) {
-            simBar.visibility = View.GONE
-            return
-        }
-        when (val st = OfficeSim.state(this)) {
-            is OfficeSim.State.Unknown -> simBar.visibility = View.GONE
-            is OfficeSim.State.Ready -> {
-                val sim = st.sim
-                if (sim == null) {
-                    simBarText.text = "Office SIM select pannala -- calls report aagathu"
-                    simBar.visibility = View.VISIBLE
-                    showSimChooser()
+        val snap = OfficeSim.snapshot(this)
+        val callPhoneGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
+            PackageManager.PERMISSION_GRANTED
+        when (snap.status) {
+            OfficeSim.Status.NO_PERMISSION -> showSimWarning(
+                "Phone permission illa -- SIM check aagala, calls report aagathu" +
+                    (if (callPhoneGranted) " (auto-dial default SIM-la pogum)" else ""), false)
+            OfficeSim.Status.UNAVAILABLE ->
+                if (snap.hold) showSimWarning("SIM list padikka mudiyala -- calls hold-la irukku, admin-kitta sollunga", false)
+                else simBar.visibility = View.GONE
+            OfficeSim.Status.NEED_CHOICE -> {
+                showSimWarning((snap.note ?: "Office SIM select pannala") + " -- calls report aagathu", true)
+                if (!OfficeSim.snoozed(this)) showSimChooser()
+            }
+            OfficeSim.Status.SINGLE, OfficeSim.Status.MULTI_READY -> {
+                val sim = snap.chosen
+                val label = if (sim != null) "Office SIM: ${sim.maskedLabel}" else "Office SIM"
+                if (OfficeSim.unknownHold(this)) {
+                    showSimWarning("Could not match SIM calls – tell admin. ($label)", true)
                 } else {
-                    simBarText.text = "Office SIM: ${sim.maskedLabel}"
-                    simBar.visibility = View.VISIBLE
+                    showSimInfo(label + (snap.note?.let { n -> " -- $n" } ?: ""))
                 }
             }
         }
     }
 
     private fun showSimChooser() {
-        if (simDialog?.isShowing == true || isFinishing) return
-        val sims = OfficeSim.activeSims(this)
+        if (isFinishing || isDestroyed || simDialog?.isShowing == true) return
+        val sims = OfficeSim.listActive(this)
         if (sims.isEmpty()) {
             Toast.makeText(this, "SIM details padikka mudiyala (Phone permission check pannunga)", Toast.LENGTH_LONG).show()
             return
         }
-        val current = OfficeSim.chosen(this, sims)
+        val current = OfficeSim.snapshot(this).chosen
         var picked = sims.indexOfFirst { it.subId == current?.subId }
-        val dlg = android.app.AlertDialog.Builder(this)
+        lateinit var dlg: android.app.AlertDialog
+        dlg = android.app.AlertDialog.Builder(this)
             .setTitle("Office SIM-a select pannunga")
-            .setSingleChoiceItems(sims.map { it.maskedLabel }.toTypedArray(), picked) { _, which -> picked = which }
+            .setSingleChoiceItems(sims.map { it.maskedLabel }.toTypedArray(), picked) { _, which ->
+                picked = which
+                dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
+            }
             .setPositiveButton("Save") { _, _ ->
                 if (picked >= 0) {
                     OfficeSim.choose(this, sims[picked])
@@ -233,10 +264,13 @@ class MainActivity : ComponentActivity() {
                 }
                 updateSimBar()
             }
-            .setNegativeButton("Later", null)
+            .setNegativeButton("Later") { _, _ ->
+                OfficeSim.snooze(this)   // do not re-open on every resume for 6 hours
+            }
             .create()
         simDialog = dlg
         dlg.show()
+        dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.isEnabled = picked >= 0
     }
 
     private fun buildPermissionBanner(): View {
@@ -407,12 +441,15 @@ class MainActivity : ComponentActivity() {
         // dialer open aagum, staff 1-tap pannanum (permission kudukkura varaikkum fallback).
         val action = if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL
         val callIntent = Intent(action, Uri.parse("tel:$phoneNumber"))
-        // v1.10: place the call from the chosen office SIM when it is known (2+ SIMs); any
-        // failure falls back to the phone's default SIM behaviour.
+        // v1.10: place the call from the chosen office SIM only when its handle POSITIVELY maps to
+        // that SIM (2+ SIMs); otherwise the phone's default behaviour. The sync later learns the
+        // call-log PHONE_ACCOUNT_ID of this call (recordDial) as an extra id for the chosen SIM.
         if (granted) {
             try {
-                OfficeSim.chosenHandle(this)?.let {
-                    callIntent.putExtra(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
+                val handle = OfficeSim.chosenHandle(this, OfficeSim.snapshot(this))
+                if (handle != null) {
+                    callIntent.putExtra(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle)
+                    OfficeSim.recordDial(this, phoneNumber)
                 }
             } catch (e: Exception) {
                 android.util.Log.w("OfficeSim", "dial: SIM handle skipped: ${e.message}")
@@ -442,6 +479,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        simDialog?.dismiss()
+        simDialog = null
         CallLogReporter.stopListening(this)
         BulkSmsSender.stop()
         super.onDestroy()
