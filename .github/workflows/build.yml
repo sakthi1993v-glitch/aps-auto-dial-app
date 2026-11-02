@@ -19,8 +19,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # 2026-11: android-actions/setup-android@v3 now fails on the hosted runner image
+      # ("Failed to find package 'tools'", sdkmanager exit 1). The ubuntu runner already ships
+      # the Android SDK (ANDROID_HOME); we only need the licences accepted so Gradle can fetch
+      # the compileSdk platform if it is missing.
+      - name: Accept Android SDK licenses
+        run: |
+          SDKM=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager | sort | tail -1)
+          echo "using $SDKM"
+          yes | "$SDKM" --licenses > /dev/null || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
