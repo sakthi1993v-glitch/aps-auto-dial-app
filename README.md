@@ -30,13 +30,27 @@ remote `versionCode` is higher than the running build, it downloads the new APK
 Android still requires one final "Install" tap — no app can silently self-install without
 root/device-owner privileges, this is the closest to fully-automatic that's possible.
 
-**Releasing a new version — do all four, in order, or the update-check won't fire:**
+**Releasing a new version — publish the APK before advertising it to phones:**
 1. Bump `versionCode` (and `versionName`) in `app/build.gradle.kts`.
-2. Push to `main` -> GitHub Actions builds the APK (Actions tab -> Artifacts).
-3. Create/update a GitHub Release tag (e.g. `v1.2-debug`) with that APK attached
-   (`gh release create` or `gh release upload --clobber`).
-4. Update `version.json` at the repo root with the new `versionCode`/`versionName`/`apkUrl`
-   (the release asset URL from step 3) and push it to `main`.
+2. Build and validate the signed APK. A push to `main` automatically creates a release
+   tag from the verified APK version; a branch workflow produces an artifact for testing.
+3. Verify the new release asset exists, its package/version, and the existing shared
+   signing certificate. Never replace an existing release tag with different APK bytes.
+4. Only then update `version.json` with the new `versionCode`/`versionName`/`apkUrl`
+   and push it to `main`. Android still requires the user to accept installation.
+
+## Loading recovery (v1.11)
+
+The WebView restores its history and reloads the current page after activity recreation.
+Network/main-page HTTP or TLS failures show Retry; Retry makes the WebView visible again.
+Loading has a 30-second deadline, and stale navigation callbacks cannot cancel a newer
+page's deadline. A committed visible page stops the native spinner; this does not certify
+that every CRM API request has completed. Normal launches honour server cache freshness;
+the existing one-time version-upgrade migration remains in place.
+
+The blue Office SIM confirmation auto-hides after five seconds. Red SIM/permission warnings
+remain visible until their underlying issue is resolved. SIM selection does not gate CRM
+page loading.
 
 ## Call-duration tracking (v1.2+)
 

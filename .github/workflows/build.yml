@@ -52,7 +52,7 @@ jobs:
           echo "ANDROID_KEYSTORE_PATH=$HOME/signing/apsconnect.p12" >> "$GITHUB_ENV"
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug assembleDebugAndroidTest --no-daemon
 
       # Fail loudly if the APK did not come out signed with the shared key -- a silently
       # wrong-signed release is exactly the bug this whole change exists to prevent.
@@ -98,6 +98,12 @@ jobs:
         with:
           name: aps-auto-dial-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload emulator regression tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: aps-auto-dial-instrumentation-debug
+          path: app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
       # Publish the signed APK first using its verified Gradle version. Advance version.json
       # only AFTER that release asset is verified, so phones never receive an updater URL

@@ -13,6 +13,7 @@ android {
         targetSdk = 34
         versionCode = 12
         versionName = "1.11"
+        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
     // 2026-08-07 -- THE UPDATE-LOOP FIX. Read this before touching it.
@@ -76,4 +77,10 @@ android {
 dependencies {
     implementation("androidx.activity:activity-ktx:1.9.0")
     implementation("androidx.core:core-ktx:1.13.1")
+    // Legacy platform instrumentation is needed only by the emulator test APK.
+    for (library in listOf("android.test.base", "android.test.runner")) {
+        androidTestCompileOnly(files(androidComponents.sdkComponents.sdkDirectory.map {
+            it.file("platforms/android-34/optional/$library.jar")
+        }))
+    }
 }
