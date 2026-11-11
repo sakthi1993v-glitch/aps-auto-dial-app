@@ -5,14 +5,19 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
@@ -51,6 +56,43 @@ class MainActivity : ComponentActivity() {
     private lateinit var simBar: View
     private lateinit var simBarText: TextView
     private var simDialog: android.app.AlertDialog? = null
+    private val loadingHandler = Handler(Looper.getMainLooper())
+    private var mainFrameFailed = false
+    private var activeLoadUrl: String? = null
+    private lateinit var errorText: TextView
+    private val loadTimeout = Runnable {
+        if (progressBar.visibility == View.VISIBLE) {
+            // Mark failure before stopping; a late onPageFinished must not hide Retry.
+            showLoadError("CRM load aaga neram aaguthu. Internet check pannitu Retry pannunga.")
+            webView.stopLoading()
+        }
+    }
+
+    private fun beginPageLoad(url: String? = webView.url) {
+        activeLoadUrl = url?.substringBefore('#')
+        mainFrameFailed = false
+        webView.visibility = View.VISIBLE
+        errorView.visibility = View.GONE
+        progressBar.visibility = View.VISIBLE
+        loadingHandler.removeCallbacks(loadTimeout)
+        loadingHandler.postDelayed(loadTimeout, 30000)
+    }
+
+    private fun pageReady() {
+        loadingHandler.removeCallbacks(loadTimeout)
+        progressBar.visibility = View.GONE
+    }
+
+    private fun isCurrentLoad(url: String?): Boolean =
+        url != null && url.substringBefore('#') == activeLoadUrl
+
+    private fun showLoadError(message: String) {
+        mainFrameFailed = true
+        pageReady()
+        errorText.text = message
+        webView.visibility = View.GONE
+        errorView.visibility = View.VISIBLE
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -103,14 +145,8 @@ class MainActivity : ComponentActivity() {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true   // CRM login state uses sessionStorage
 
-        // 2026-08-06 (v1.3): stale-cache complaints — server hang aana nerathu WebView pazhaya
-        // failed/blank page-a cache pannitu, server sari aana appuram-um adha kaatitu irundhadhu.
-        // Fix rendu layer:
-        //  1. Ovvoru launch-ilum HTTP cache muzhusa clear + cacheMode=LOAD_NO_CACHE — page eppovum
-        //     server-la irundhu fresh-a varum, pazhaya cached copy ODAVE run aagadhu.
-        //  2. App version maarina (update install aana first launch) FULL wipe — WebStorage
-        //     (localStorage/indexedDB) + cookies + history ellame delete, fresh-install madhiri.
-        //     Cookies pona staff oru thadava re-login pannuvanga — adhu expected, one time.
+        // Reuse HTTP cache according to server freshness headers and versioned asset URLs.
+        // Preserve the existing one-time upgrade migration below.
         wipeStaleState()
 
         webView.webViewClient = object : WebViewClient() {
@@ -124,25 +160,47 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                progressBar.visibility = View.VISIBLE
-                errorView.visibility = View.GONE
+                beginPageLoad(url)
+            }
+
+            override fun onPageCommitVisible(view: WebView, url: String?) {
+                // A slow image/third-party subresource must not keep a usable page spinning.
+                if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                progressBar.visibility = View.GONE
+                if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) {
-                    progressBar.visibility = View.GONE
-                    webView.visibility = View.GONE
-                    errorView.visibility = View.VISIBLE
+                if (request.isForMainFrame && isCurrentLoad(request.url.toString())) {
+                    showLoadError("CRM connect aagala. Internet check pannitu Retry pannunga.")
+                }
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                if (request.isForMainFrame && isCurrentLoad(request.url.toString()) && response.statusCode >= 400) {
+                    showLoadError("CRM server response ${response.statusCode}. Konjam neram kazhithu Retry pannunga.")
+                }
+            }
+
+            override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                handler.cancel()
+                // Keep failed secondary assets from replacing an otherwise usable CRM page.
+                if (isCurrentLoad(error.url)) {
+                    showLoadError("Secure CRM connection verify aagala. Admin-kitta sollunga; appuram Retry pannunga.")
                 }
             }
         }
 
-        if (savedInstanceState == null) {
+        beginPageLoad()
+        val restored = savedInstanceState?.getBundle("crmWebViewState")?.let { webView.restoreState(it) }
+        if (restored == null) {
             webView.loadUrl(crmUrl)
+        } else {
+            // Restored history need not trigger loading callbacks on every WebView version.
+            // Reload its current page so readiness/error handling always completes.
+            webView.reload()
         }
 
         // Auto-dial, call-log tracking and Bulk SMS are staff-only features -- a student has
@@ -332,17 +390,15 @@ class MainActivity : ComponentActivity() {
         permissionBanner.visibility = View.VISIBLE
     }
 
-    // v1.3: pazhaya cache/state odave run aagakoodadhu.
-    // Ovvoru launch: HTTP cache clear + LOAD_NO_CACHE (page eppovum server fresh).
-    // Version upgrade first launch: WebStorage + cookies + history FULL wipe (fresh install
-    // madhiri) — appuram indha versionCode-a kurichi vachukkum, adutha launches normal.
+    // Honour HTTP freshness on normal launches. Keep the existing one-time version-upgrade
+    // migration, so a stale asset is discarded once rather than on every app opening.
     private fun wipeStaleState() {
-        webView.clearCache(true)
-        webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+        webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
 
         val prefs = getSharedPreferences("app_state", MODE_PRIVATE)
         val lastVersion = prefs.getInt("lastVersionCode", -1)
         if (lastVersion != BuildConfig.VERSION_CODE) {
+            webView.clearCache(true)
             webView.clearHistory()
             webView.clearFormData()
             WebStorage.getInstance().deleteAllData()
@@ -370,6 +426,7 @@ class MainActivity : ComponentActivity() {
         inner.layoutParams = innerParams
 
         val text = TextView(this)
+        errorText = text
         text.text = "CRM connect aagala. Internet check pannitu Retry pannunga."
         text.setPadding(40, 0, 40, 40)
         text.gravity = Gravity.CENTER
@@ -377,7 +434,10 @@ class MainActivity : ComponentActivity() {
 
         val retryBtn = Button(this)
         retryBtn.text = "Retry"
-        retryBtn.setOnClickListener { webView.loadUrl(crmUrl) }
+        retryBtn.setOnClickListener {
+            beginPageLoad()
+            webView.loadUrl(crmUrl)
+        }
 
         inner.addView(text)
         inner.addView(retryBtn)
@@ -485,7 +545,15 @@ class MainActivity : ComponentActivity() {
             .show()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        val webState = Bundle()
+        webView.saveState(webState)
+        outState.putBundle("crmWebViewState", webState)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
+        loadingHandler.removeCallbacks(loadTimeout)
         simBar.removeCallbacks(simBarHideRunnable)
         simDialog?.dismiss()
         simDialog = null
