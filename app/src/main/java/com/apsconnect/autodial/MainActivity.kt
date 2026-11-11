@@ -192,6 +192,10 @@ class MainActivity : ComponentActivity() {
         val restored = savedInstanceState?.getBundle("crmWebViewState")?.let { webView.restoreState(it) }
         if (restored == null) {
             webView.loadUrl(crmUrl)
+        } else {
+            // Restored history need not trigger loading callbacks on every WebView version.
+            // Reload its current page so readiness/error handling always completes.
+            webView.reload()
         }
 
         // Auto-dial, call-log tracking and Bulk SMS are staff-only features -- a student has
