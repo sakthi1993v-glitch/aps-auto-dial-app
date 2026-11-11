@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
     private var simDialog: android.app.AlertDialog? = null
     private val loadingHandler = Handler(Looper.getMainLooper())
     private var mainFrameFailed = false
+    private var activeLoadUrl: String? = null
     private lateinit var errorText: TextView
     private val loadTimeout = Runnable {
         if (progressBar.visibility == View.VISIBLE) {
@@ -67,7 +68,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun beginPageLoad() {
+    private fun beginPageLoad(url: String? = webView.url) {
+        activeLoadUrl = url?.substringBefore('#')
         mainFrameFailed = false
         webView.visibility = View.VISIBLE
         errorView.visibility = View.GONE
@@ -80,6 +82,9 @@ class MainActivity : ComponentActivity() {
         loadingHandler.removeCallbacks(loadTimeout)
         progressBar.visibility = View.GONE
     }
+
+    private fun isCurrentLoad(url: String?): Boolean =
+        url != null && url.substringBefore('#') == activeLoadUrl
 
     private fun showLoadError(message: String) {
         mainFrameFailed = true
@@ -155,26 +160,26 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                beginPageLoad()
+                beginPageLoad(url)
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 // A slow image/third-party subresource must not keep a usable page spinning.
-                if (!mainFrameFailed) pageReady()
+                if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                if (!mainFrameFailed) pageReady()
+                if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) {
+                if (request.isForMainFrame && isCurrentLoad(request.url.toString())) {
                     showLoadError("CRM connect aagala. Internet check pannitu Retry pannunga.")
                 }
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
-                if (request.isForMainFrame && response.statusCode >= 400) {
+                if (request.isForMainFrame && isCurrentLoad(request.url.toString()) && response.statusCode >= 400) {
                     showLoadError("CRM server response ${response.statusCode}. Konjam neram kazhithu Retry pannunga.")
                 }
             }
@@ -182,7 +187,7 @@ class MainActivity : ComponentActivity() {
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel()
                 // Keep failed secondary assets from replacing an otherwise usable CRM page.
-                if (error.url == view.url) {
+                if (isCurrentLoad(error.url)) {
                     showLoadError("Secure CRM connection verify aagala. Admin-kitta sollunga; appuram Retry pannunga.")
                 }
             }
