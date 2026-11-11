@@ -7,12 +7,13 @@ import android.os.SystemClock
 import android.test.InstrumentationTestCase
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.ProgressBar
+import java.io.ByteArrayInputStream
 
 /**
  * Exercises the Activity's real loading callbacks and recovery controls without a backend,
@@ -58,13 +59,10 @@ class LoadingRecoveryTest : InstrumentationTestCase() {
         }
     }
 
-    fun testNetworkFailureRetryRestoresVisibleWebView() {
+    fun testHttpFailureRetryRestoresVisibleWebView() {
         onUi {
             callbacks.onPageStarted(webView, firstUrl, null)
-            callbacks.onReceivedError(webView, Request(firstUrl), object : WebResourceError() {
-                override fun getErrorCode() = WebViewClient.ERROR_CONNECT
-                override fun getDescription(): CharSequence = "Fixture connection failed"
-            })
+            callbacks.onReceivedHttpError(webView, Request(firstUrl), unavailable())
             assertEquals(View.VISIBLE, errorView.visibility)
             assertEquals(View.GONE, webView.visibility)
             assertEquals(View.GONE, spinner.visibility)
@@ -113,11 +111,7 @@ class LoadingRecoveryTest : InstrumentationTestCase() {
     fun testSecondaryResourceFailureDoesNotHideUsablePage() {
         onUi {
             callbacks.onPageStarted(webView, firstUrl, null)
-            callbacks.onReceivedError(webView, Request("https://assets.invalid/image.png", false),
-                object : WebResourceError() {
-                    override fun getErrorCode() = WebViewClient.ERROR_CONNECT
-                    override fun getDescription(): CharSequence = "Fixture image failed"
-                })
+            callbacks.onReceivedHttpError(webView, Request("https://assets.invalid/image.png", false), unavailable())
             callbacks.onPageCommitVisible(webView, firstUrl)
             assertEquals(View.VISIBLE, webView.visibility)
             assertEquals(View.GONE, errorView.visibility)
@@ -156,6 +150,11 @@ class LoadingRecoveryTest : InstrumentationTestCase() {
         }
         return null
     }
+
+    private fun unavailable() = WebResourceResponse(
+        "text/html", "UTF-8", 503, "Service Unavailable", emptyMap(),
+        ByteArrayInputStream("Fixture service unavailable".toByteArray(Charsets.UTF_8))
+    )
 
     private class Request(url: String, private val mainFrame: Boolean = true) : WebResourceRequest {
         private val uri = Uri.parse(url)
