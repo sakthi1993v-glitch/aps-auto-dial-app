@@ -36,7 +36,7 @@ class InCallActivity : Activity() {
     private fun render() {
         content.removeAllViews()
         val calls = LiveInCallService.snapshot()
-        if (calls.isEmpty()) { content.addView(TextView(this).apply { text = "Call ended"; textSize = 24f }); button("Close") { finish() }; return }
+        if (calls.isEmpty()) { finish(); return }
         for ((call, _) in calls) {
             val number = if (call.details.handlePresentation == TelecomManager.PRESENTATION_ALLOWED) call.details.handle?.schemeSpecificPart ?: "Unknown number" else "Private number"
             content.addView(TextView(this).apply { text = number; textSize = 26f })

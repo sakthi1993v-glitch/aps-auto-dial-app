@@ -13,6 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
@@ -32,7 +33,9 @@ class DialerActivity : Activity() {
             val raw = number.text.toString().trim()
             if (raw.isNotEmpty()) {
                 if (ContextCompat.checkSelfPermission(this@DialerActivity, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) ActivityCompat.requestPermissions(this@DialerActivity, arrayOf(Manifest.permission.CALL_PHONE),90)
-                else try { (getSystemService(TELECOM_SERVICE) as TelecomManager).placeCall(Uri.fromParts("tel",raw,null), Bundle()) } catch (_: SecurityException) { }
+                else try { (getSystemService(TELECOM_SERVICE) as TelecomManager).placeCall(Uri.fromParts("tel",raw,null), Bundle()) } catch (_: SecurityException) { Toast.makeText(this@DialerActivity,"Phone permission is required to place a call",Toast.LENGTH_LONG).show() }
+                catch (_: IllegalArgumentException) { Toast.makeText(this@DialerActivity,"Check the phone number and try again",Toast.LENGTH_LONG).show() }
+                catch (_: IllegalStateException) { Toast.makeText(this@DialerActivity,"Phone service is unavailable. Try again shortly.",Toast.LENGTH_LONG).show() }
             }
         } })
         body.addView(Button(this).apply { text = "Live reporting setup"; setOnClickListener { startActivity(Intent(this@DialerActivity,LiveCallSetupActivity::class.java)) } })
