@@ -13,6 +13,7 @@ object LiveCallPolicy {
     }
     fun coarseOfficeAllowed(hold: Boolean, chosen: Boolean, activeSims: Int) = !hold && chosen && activeSims == 1
     fun mayShareNumber(officeMatched: Boolean, presentationAllowed: Boolean) = officeMatched && presentationAllowed
+    fun acknowledged(status: Int, accepted: Boolean) = status in 200..299 && accepted
     fun fresh(observedAt: Long, now: Long) = now - observedAt in 0..45000L
     fun connectionTime(state: Int, connectedAt: Long, now: Long): Long? =
         if (state == 4 && connectedAt in 1..now) connectedAt else null

@@ -152,8 +152,21 @@ object LiveCallReporter {
             connection.setRequestProperty("Content-Type", "application/json"); connection.setRequestProperty("Cookie", auth)
             connection.outputStream.use { it.write(packet.toString().toByteArray(Charsets.UTF_8)) }
             val status = connection.responseCode
-            deliveryStatus = if (status in 200..299) "Live state reported" else if (status == 401 || status == 403) "Staff sign-in required" else "Live server unavailable; retrying"
-            status in 200..299
+            val accepted = if (status in 200..299) {
+                val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                    val result = StringBuilder(); val buffer = CharArray(512)
+                    while (result.length < 4096) {
+                        val count = reader.read(buffer,0,minOf(buffer.size,4096-result.length))
+                        if (count < 0) break
+                        result.append(buffer,0,count)
+                    }
+                    result.toString()
+                }
+                runCatching { JSONObject(body).optBoolean("accepted",false) }.getOrDefault(false)
+            } else false
+            val ok = LiveCallPolicy.acknowledged(status,accepted)
+            deliveryStatus = if (ok) "Live state reported" else if (status == 401 || status == 403) "Staff sign-in required" else if (status in 200..299) "Live state was not accepted; awaiting a fresh report" else "Live server unavailable; retrying"
+            ok
         } catch (_: Exception) { deliveryStatus = "Offline; live state will retry"; false }
         finally { connection?.disconnect() }
     }
