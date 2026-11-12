@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private var simDialog: android.app.AlertDialog? = null
     private val loadingHandler = Handler(Looper.getMainLooper())
     private var mainFrameFailed = false
+    private var loadStartedAt = 0L
     private var activeLoadUrl: String? = null
     private lateinit var errorText: TextView
     private val loadTimeout = Runnable {
@@ -72,18 +73,30 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun beginPageLoad(url: String? = webView.url) {
+        if (loadStartedAt == 0L || mainFrameFailed || progressBar.visibility != View.VISIBLE) loadStartedAt = System.currentTimeMillis()
         activeLoadUrl = url?.substringBefore('#')
         mainFrameFailed = false
         webView.visibility = View.VISIBLE
         errorView.visibility = View.GONE
         progressBar.visibility = View.VISIBLE
         loadingHandler.removeCallbacks(loadTimeout)
-        loadingHandler.postDelayed(loadTimeout, 30000)
+        loadingHandler.postDelayed(loadTimeout,(30000-(System.currentTimeMillis()-loadStartedAt)).coerceAtLeast(500))
     }
 
     private fun pageReady() {
         loadingHandler.removeCallbacks(loadTimeout)
         progressBar.visibility = View.GONE
+        loadStartedAt = 0L
+    }
+
+    private fun checkPageContent(view: WebView, url: String?) {
+        if (isFinishing || isDestroyed || mainFrameFailed || !isCurrentLoad(url)) return
+        view.evaluateJavascript("""(function(){var b=document.body;if(!b)return false;return (b.innerText||'').trim().length>10 || Array.prototype.some.call(b.querySelectorAll('input,button,a,img,canvas'),function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0})})()""") { rendered ->
+            if (!isFinishing && !isDestroyed && !mainFrameFailed && isCurrentLoad(url)) {
+                if (rendered == "true") pageReady()
+                else if (progressBar.visibility == View.VISIBLE) loadingHandler.postDelayed({ checkPageContent(view,url) },500)
+            }
+        }
     }
 
     private fun isCurrentLoad(url: String?): Boolean =
@@ -192,6 +205,7 @@ class MainActivity : ComponentActivity() {
                     dial(url.schemeSpecificPart)
                     return true
                 }
+                if (UpdateChecker.apkNavigation(this@MainActivity,url.toString())) { pageReady(); return true }
                 return false
             }
 
@@ -201,11 +215,11 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 // A slow image/third-party subresource must not keep a usable page spinning.
-                if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
+                if (!mainFrameFailed && isCurrentLoad(url)) checkPageContent(view,url)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
+                if (!mainFrameFailed && isCurrentLoad(url)) checkPageContent(view,url)
                 val page = Uri.parse(url ?: "")
                 if (!isStudentEntry && LiveBridgePolicy.allowed(page.scheme,page.host,page.path,true)) {
                     val bridgeScript = assets.open("live-call-bridge.js").bufferedReader().use { it.readText() }
@@ -234,9 +248,15 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        webView.setDownloadListener { url, _, _, mime, _ ->
+            if (mime == "application/vnd.android.package-archive" || Uri.parse(url).path?.lowercase()?.endsWith(".apk") == true) {
+                runOnUiThread { pageReady(); UpdateChecker.browser(this,url) }
+            }
+        }
+
         beginPageLoad()
         val restored = savedInstanceState?.getBundle("crmWebViewState")?.let { webView.restoreState(it) }
-        if (restored == null) {
+        if (restored == null || UpdatePolicy.webApk(webView.url)) {
             webView.loadUrl(crmUrl)
         } else {
             // Restored history need not trigger loading callbacks on every WebView version.
@@ -262,6 +282,7 @@ class MainActivity : ComponentActivity() {
     // grant it via Settings and switch back -- no app restart needed.
     override fun onResume() {
         super.onResume()
+        UpdateChecker.onResume(this)
         if (!isStudentEntry) {
             LiveCallReporter.start(this)
             startBackgroundWorkers()
@@ -273,6 +294,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onPause() { UpdateChecker.onPause(this); super.onPause() }
 
     // v1.10 Office SIM: strip BELOW the WebView (never overlays the CRM page) showing which SIM is
     // counted + Change, or a visible warning when calls cannot be matched / are being held.
@@ -485,8 +508,10 @@ class MainActivity : ComponentActivity() {
             webView.loadUrl(crmUrl)
         }
 
+        val browserBtn = Button(this).apply { this.text = "Open CRM in browser"; setOnClickListener { UpdateChecker.browser(this@MainActivity,crmUrl) } }
         inner.addView(text)
         inner.addView(retryBtn)
+        inner.addView(browserBtn)
         container.addView(inner)
         return container
     }
@@ -601,7 +626,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        loadingHandler.removeCallbacks(loadTimeout)
+        UpdateChecker.detach(this)
+        loadingHandler.removeCallbacksAndMessages(null)
         simBar.removeCallbacks(simBarHideRunnable)
         simDialog?.dismiss()
         simDialog = null

@@ -87,3 +87,11 @@ The scrollable screen groups Phone/call-log access, explicit actual Office SIM s
 Direct CRM auto-calling on a multi-SIM phone now requires a positively mapped selected Office phone account. If mapping is missing or Office choice is held, no automatic call is placed and a setup action is offered; it does not silently use the personal/default SIM. Existing single-SIM default behaviour remains. Explicit Office SIM changes clear cached live scope and re-evaluate the current call. Ordinary manual Phone keypad calls still use Android's normal account selection.
 
 Validation: `testDebugUnitTest assembleDebug` and `node tests/live-call-bridge.test.cjs`. Real-device calls, permissions/default-role grants and SIM changes are not exercised by the automated build tests.
+
+## Update recovery (1.14)
+
+The updater now polls persisted download status, shows progress and actionable retry/browser errors, resumes after the unknown-source permission screen, and offers an explicit retry after installer cancellation. Completed APKs must match this package, the expected newer version and the installed signing certificate before installation. APK navigation opens the external browser instead of a binary document inside the CRM WebView. Blank CRM loads retain a bounded recovery screen with Retry and Open CRM in browser.
+
+These changes address defects found in the previous implementation; the reported handset failure was not reproduced on a physical device. Existing installations whose updater cannot finish can download the signed APK directly in Chrome and choose Update. Do not uninstall or clear app data. Release publication and version.json promotion are separate from building this artifact.
+
+Validation: 19 native unit tests, existing JavaScript bridge tests, signed debug APK build and package/version/signature verification. Real-device download, Android installer/permission transitions and CRM recovery remain to be checked by the owner.
