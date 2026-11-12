@@ -76,3 +76,14 @@ version is the first one that actually produces that data.
 - Idle-time-between-calls (gaps in the callEvents timeline) for the manager-side daily
   report -- computable from timestamps already being logged, no new tracking needed, just
   a report view.
+
+
+## Staff Phone / SIM setup (1.13)
+
+The trusted staff CRM can call `window.APSLiveCalls.openSetup()` to open the native Phone / SIM setup screen. The read-only `getSetupStatus()` returns safe checklist metadata (one-based selected slot/carrier and permission booleans); it does not request permissions or change a SIM. Requests use independent IDs so status and logout replies do not interfere. Bridge actions are limited to `prepareLogout`, `openSetup` and `getSetupStatus`, on the approved HTTPS CRM main frame. `aps-live-bridge-ready` is dispatched after injection and on resume.
+
+The scrollable screen groups Phone/call-log access, explicit actual Office SIM selection/change, reporting consent, effective notification permission/global/channel settings, default Phone role, Android14 full-screen access and App settings. State refreshes on resume and permission-result callbacks. Permanent-denial/restricted-setting cases offer explicit Android App settings rather than repeating ineffective grants. Only slot/carrier labels are shown; subscription IDs, ICCIDs, SIM phone numbers and cookies are not exposed through the bridge.
+
+Direct CRM auto-calling on a multi-SIM phone now requires a positively mapped selected Office phone account. If mapping is missing or Office choice is held, no automatic call is placed and a setup action is offered; it does not silently use the personal/default SIM. Existing single-SIM default behaviour remains. Explicit Office SIM changes clear cached live scope and re-evaluate the current call. Ordinary manual Phone keypad calls still use Android's normal account selection.
+
+Validation: `testDebugUnitTest assembleDebug` and `node tests/live-call-bridge.test.cjs`. Real-device calls, permissions/default-role grants and SIM changes are not exercised by the automated build tests.

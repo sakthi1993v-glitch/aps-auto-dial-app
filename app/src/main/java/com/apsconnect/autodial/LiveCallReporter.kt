@@ -44,6 +44,7 @@ object LiveCallReporter {
     @Volatile var deliveryStatus = "Not connected"
         private set
 
+    fun officeSelectionChanged(context: Context) { publish(context,"unknown",null,"unknown",0,0,"telephony") }
     fun enabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("enabled", false)
     fun defaultDialer(context: Context) = (context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager).defaultDialerPackage == context.packageName
     fun setEnabled(context: Context, enabled: Boolean) {

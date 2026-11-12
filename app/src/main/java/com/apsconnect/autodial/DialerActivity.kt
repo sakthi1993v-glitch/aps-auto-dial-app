@@ -38,7 +38,7 @@ class DialerActivity : Activity() {
                 catch (_: IllegalStateException) { Toast.makeText(this@DialerActivity,"Phone service is unavailable. Try again shortly.",Toast.LENGTH_LONG).show() }
             }
         } })
-        body.addView(Button(this).apply { text = "Live reporting setup"; setOnClickListener { startActivity(Intent(this@DialerActivity,LiveCallSetupActivity::class.java)) } })
+        body.addView(Button(this).apply { text = "Phone / SIM setup"; setOnClickListener { startActivity(Intent(this@DialerActivity,LiveCallSetupActivity::class.java)) } })
         body.addView(TextView(this).apply { text = "Recent calls"; textSize = 20f })
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED) {
             try { contentResolver.query(CallLog.Calls.CONTENT_URI, arrayOf(CallLog.Calls.NUMBER,CallLog.Calls.TYPE,CallLog.Calls.DURATION),null,null,"${CallLog.Calls.DATE} DESC")?.use { c ->

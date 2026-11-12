@@ -58,6 +58,7 @@ class LiveInCallService : InCallService() {
         LiveCallReporter.publish(this, "unknown", null, "unknown", 0, 0, "telecom")
         listeners.toList().forEach { it() }; super.onDestroy()
     }
+    fun refreshReporting() { changed() }
     private fun changed() {
         val call = trackedCalls.keys.firstOrNull { it.state == Call.STATE_ACTIVE }
             ?: trackedCalls.keys.firstOrNull { it.state == Call.STATE_RINGING } ?: trackedCalls.keys.firstOrNull() ?: return

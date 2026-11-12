@@ -142,6 +142,8 @@ object OfficeSim {
     fun choose(context: Context, sim: Sim) {
         write(context, sim, false)
         prefs(context).edit().putBoolean("unknownHold", false).remove("snoozeUntil").apply()
+        LiveCallReporter.officeSelectionChanged(context)
+        LiveInCallService.current?.refreshReporting()
     }
 
     private fun clearChoice(context: Context) {
@@ -180,6 +182,20 @@ object OfficeSim {
         if (hasSaved && !deliberate) clearChoice(context)   // auto choice is not valid for 2+ SIMs
         return Snapshot(Status.NEED_CHOICE, active, null, learned, true, null)
     }
+
+    /** Read-only setup/bridge snapshot: observing status never chooses or changes a SIM. */
+    fun setupSnapshot(context: Context): Snapshot {
+        val p = prefs(context)
+        val deliberate = p.contains("subId") && !p.getBoolean("auto", false)
+        val learned: Set<String> = HashSet(p.getStringSet("learned", emptySet()) ?: emptySet())
+        if (!hasPhoneState(context)) return Snapshot(Status.NO_PERMISSION, emptyList(), null, learned, deliberate, null)
+        val active = activeSims(context)
+        if (active.isEmpty()) return Snapshot(Status.UNAVAILABLE, active, null, learned, deliberate, null)
+        val chosen = saved(p, active)
+        if (chosen != null && (deliberate || active.size == 1)) return Snapshot(if (active.size == 1) Status.SINGLE else Status.MULTI_READY, active, chosen, learned, false, null)
+        return Snapshot(Status.NEED_CHOICE, active, null, learned, true, "Office SIM confirmation required")
+    }
+    fun explicitChoice(context: Context): Boolean = prefs(context).contains("subId") && !prefs(context).getBoolean("auto", false)
 
     enum class Match { CHOSEN, OTHER, UNKNOWN }
 

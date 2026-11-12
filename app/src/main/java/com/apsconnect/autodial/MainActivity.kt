@@ -24,6 +24,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONObject
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ProgressBar
@@ -138,7 +139,7 @@ class MainActivity : ComponentActivity() {
         outer.addView(root)
         outer.addView(simBar)
         if (!isStudentEntry) outer.addView(Button(this).apply {
-            text = "Live call setup"
+            text = "Phone / SIM setup"
             setOnClickListener { startActivity(Intent(this@MainActivity, LiveCallSetupActivity::class.java)) }
         })
         setContentView(outer)
@@ -158,11 +159,29 @@ class MainActivity : ComponentActivity() {
         if (!isStudentEntry && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(webView, "APSNativeLiveMessages", setOf(crmBase)) { view, message, origin, mainFrame, reply ->
                 val path = Uri.parse(view.url ?: "").path ?: ""
-                if (LiveBridgePolicy.allowed(origin.scheme, origin.host, path, mainFrame) && message.data == "prepareLogout") {
-                    Thread {
-                        val ok = LiveCallReporter.clearBeforeLogout()
-                        runOnUiThread { reply.postMessage(if (ok) "cleared" else "unconfirmed") }
-                    }.start()
+                if (LiveBridgePolicy.allowed(origin.scheme, origin.host, path, mainFrame)) {
+                    val raw = message.data ?: ""
+                    if (raw.length > 512) return@addWebMessageListener
+                    val legacy = raw == "prepareLogout"
+                    val request = if (legacy) JSONObject().put("action","prepareLogout") else runCatching { JSONObject(raw) }.getOrNull() ?: return@addWebMessageListener
+                    val action = request.optString("action","")
+                    val id = request.optString("id","")
+                    if (!LiveBridgePolicy.actionAllowed(action) || (!legacy && !id.matches(Regex("[A-Za-z0-9_-]{1,80}")))) return@addWebMessageListener
+                    fun respond(value: Any) {
+                        if (legacy) reply.postMessage(if (value == true) "cleared" else "unconfirmed")
+                        else reply.postMessage(JSONObject().put("id",id).put("value",value).toString())
+                    }
+                    when (action) {
+                        "prepareLogout" -> Thread {
+                            val ok = LiveCallReporter.clearBeforeLogout()
+                            runOnUiThread { respond(ok) }
+                        }.start()
+                        "openSetup" -> {
+                            val opened = runCatching { startActivity(Intent(this@MainActivity,LiveCallSetupActivity::class.java)); true }.getOrDefault(false)
+                            respond(opened)
+                        }
+                        "getSetupStatus" -> respond(JSONObject(LivePhoneSetupStatus.capture(this@MainActivity).wire()))
+                    }
                 }
             }
         }
@@ -189,7 +208,8 @@ class MainActivity : ComponentActivity() {
                 if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
                 val page = Uri.parse(url ?: "")
                 if (!isStudentEntry && LiveBridgePolicy.allowed(page.scheme,page.host,page.path,true)) {
-                    view.evaluateJavascript("""(function(){if(!window.APSNativeLiveMessages)return;window.APSLiveCalls={prepareLogout:function(){return new Promise(function(resolve){var done=false;var finish=function(v){if(done)return;done=true;resolve(v)};APSNativeLiveMessages.onmessage=function(e){finish(e.data==='cleared')};setTimeout(function(){finish(false)},2500);APSNativeLiveMessages.postMessage('prepareLogout')})}}})()""",null)
+                    val bridgeScript = assets.open("live-call-bridge.js").bufferedReader().use { it.readText() }
+                    view.evaluateJavascript(bridgeScript,null)
                 }
             }
 
@@ -247,6 +267,10 @@ class MainActivity : ComponentActivity() {
             startBackgroundWorkers()
             updatePermissionBanner()
             updateSimBar()
+            if (::webView.isInitialized) {
+                val page = Uri.parse(webView.url ?: "")
+                if (LiveBridgePolicy.allowed(page.scheme,page.host,page.path,true)) webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('aps-live-bridge-ready'))",null)
+            }
         }
     }
 
@@ -530,18 +554,20 @@ class MainActivity : ComponentActivity() {
         // dialer open aagum, staff 1-tap pannanum (permission kudukkura varaikkum fallback).
         val action = if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL
         val callIntent = Intent(action, Uri.parse("tel:$phoneNumber"))
-        // v1.10: place the call from the chosen office SIM only when its handle POSITIVELY maps to
-        // that SIM (2+ SIMs); otherwise the phone's default behaviour. The sync later learns the
-        // call-log PHONE_ACCOUNT_ID of this call (recordDial) as an extra id for the chosen SIM.
+        // A selected multi-SIM Office account must map positively. Never silently
+        // auto-call from Android's personal/default account when that mapping is absent.
         if (granted) {
-            try {
-                val handle = OfficeSim.chosenHandle(this, OfficeSim.snapshot(this))
-                if (handle != null) {
-                    callIntent.putExtra(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle)
-                    OfficeSim.recordDial(this, phoneNumber)
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("OfficeSim", "dial: SIM handle skipped: ${e.message}")
+            val snapshot = OfficeSim.snapshot(this)
+            val handle = OfficeSim.chosenHandle(this,snapshot)
+            if (!LiveCallPolicy.directDialAllowed(snapshot.hold,snapshot.active.size,snapshot.chosen != null,handle != null)) {
+                android.app.AlertDialog.Builder(this).setTitle("Confirm Office SIM before auto dial")
+                    .setMessage("The selected Office SIM cannot be confirmed for dialing. Open Phone / SIM setup and choose or confirm the Office SIM. No call was placed.")
+                    .setNegativeButton("Cancel",null).setPositiveButton("Open Phone / SIM setup") { _,_ -> startActivity(Intent(this,LiveCallSetupActivity::class.java)) }.show()
+                return
+            }
+            if (handle != null) {
+                callIntent.putExtra(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE,handle)
+                OfficeSim.recordDial(this,phoneNumber)
             }
         }
         startActivity(callIntent)

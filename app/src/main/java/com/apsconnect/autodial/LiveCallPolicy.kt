@@ -11,6 +11,7 @@ object LiveCallPolicy {
         3, 10 -> "offhook" // holding / disconnecting, not active talk
         else -> "unknown"
     }
+    fun directDialAllowed(hold: Boolean, activeSims: Int, selected: Boolean, handleMatched: Boolean) = !hold && activeSims > 0 && (activeSims == 1 || (selected && handleMatched))
     fun coarseOfficeAllowed(hold: Boolean, chosen: Boolean, activeSims: Int) = !hold && chosen && activeSims == 1
     fun mayShareNumber(officeMatched: Boolean, presentationAllowed: Boolean) = officeMatched && presentationAllowed
     fun acknowledged(status: Int, accepted: Boolean) = status in 200..299 && accepted
@@ -34,5 +35,6 @@ object LiveCookiePolicy {
 }
 
 object LiveBridgePolicy {
+    fun actionAllowed(action: String?) = action in setOf("prepareLogout", "openSetup", "getSetupStatus")
     fun allowed(scheme: String?, host: String?, path: String?, mainFrame: Boolean): Boolean = mainFrame && scheme == "https" && host == "agent.adiparasakthicharitabletrust.in" && (path == "/" || path == "/crm" || path?.startsWith("/crm/") == true || path == "/login")
 }
