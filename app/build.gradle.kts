@@ -11,8 +11,8 @@ android {
         applicationId = "com.apsconnect.autodial"
         minSdk = 24
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.11"
+        versionCode = 13
+        versionName = "1.12-live-preview"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
@@ -75,8 +75,10 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation("androidx.activity:activity-ktx:1.9.0")
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.webkit:webkit:1.11.0")
     // Legacy platform instrumentation is needed only by the emulator test APK.
     for (library in listOf("android.test.base", "android.test.runner")) {
         androidTestCompileOnly(files(androidComponents.sdkComponents.sdkDirectory.map {

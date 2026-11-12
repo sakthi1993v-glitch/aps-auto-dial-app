@@ -1,0 +1,14 @@
+package com.apsconnect.autodial
+import org.junit.Assert.*
+import org.junit.Test
+class LiveCallPolicyTest {
+ @Test fun onlyActiveIsConnected() { assertEquals("connected",LiveCallPolicy.phase(4)); assertEquals("offhook",LiveCallPolicy.phase(3)); assertEquals("dialing",LiveCallPolicy.phase(1)); assertEquals("ringing",LiveCallPolicy.phase(2)); assertEquals("ended",LiveCallPolicy.phase(7)) }
+ @Test fun invalidOrUnconfirmedConnectTimeIsNotTalkTime() { assertNull(LiveCallPolicy.connectionTime(1,100,200)); assertNull(LiveCallPolicy.connectionTime(4,0,200)); assertNull(LiveCallPolicy.connectionTime(4,300,200)); assertEquals(100L,LiveCallPolicy.connectionTime(4,100,200)) }
+ @Test fun cookieSwitchBlocksOldCallUntilNewCallOrFinish() { val guard=LiveIdentityGuard();assertTrue(guard.mayShare("call-a"));guard.accountChanged("call-a");assertFalse(guard.mayShare("call-a"));assertTrue(guard.mayShare("call-b"));guard.callFinished();assertTrue(guard.mayShare("call-a")) }
+ @Test fun coarseCallCannotMoveToNewAccount() { val guard=LiveIdentityGuard();guard.accountChanged(null);assertFalse(guard.mayShare(null));guard.callFinished();assertTrue(guard.mayShare(null)) }
+ @Test fun ambiguousOrPrivateSimNeverHasCoarseOfficeActivity() { assertFalse(LiveCallPolicy.coarseOfficeAllowed(false,true,2));assertFalse(LiveCallPolicy.coarseOfficeAllowed(true,true,1));assertFalse(LiveCallPolicy.coarseOfficeAllowed(false,false,1));assertTrue(LiveCallPolicy.coarseOfficeAllowed(false,true,1)) }
+ @Test fun privateOrUnmatchedCounterpartIsHidden() { assertFalse(LiveCallPolicy.mayShareNumber(false,true));assertFalse(LiveCallPolicy.mayShareNumber(true,false));assertTrue(LiveCallPolicy.mayShareNumber(true,true)) }
+ @Test fun staleOrFuturePacketsAreNotReplayed() { assertTrue(LiveCallPolicy.fresh(100,1000));assertFalse(LiveCallPolicy.fresh(100,46000));assertFalse(LiveCallPolicy.fresh(2000,1000)) }
+ @Test fun unrelatedAndReorderedCookiesKeepIdentity() { assertTrue(LiveCookiePolicy.sameIdentity("wa_sess=one; cf_clearance=old", "cf_clearance=new; pref=en; wa_sess=one"));assertFalse(LiveCookiePolicy.sameIdentity("wa_sess=one", "wa_sess=two"));assertFalse(LiveCookiePolicy.sameIdentity("wa_sess=one", "cf_clearance=old"));assertFalse(LiveCookiePolicy.sameIdentity("cf_clearance=old", "pref=en")) }
+ @Test fun bridgeAcceptsOnlyCrmMainFrame() { assertTrue(LiveBridgePolicy.allowed("https","agent.adiparasakthicharitabletrust.in","/crm/",true));assertFalse(LiveBridgePolicy.allowed("https","agent.adiparasakthicharitabletrust.in","/crm/",false));assertFalse(LiveBridgePolicy.allowed("http","agent.adiparasakthicharitabletrust.in","/crm/",true));assertFalse(LiveBridgePolicy.allowed("https","evil.example","/crm/",true));assertFalse(LiveBridgePolicy.allowed("https","agent.adiparasakthicharitabletrust.in","/student",true));assertFalse(LiveBridgePolicy.allowed("https","agent.adiparasakthicharitabletrust.in","/crm-evil",true)) }
+}

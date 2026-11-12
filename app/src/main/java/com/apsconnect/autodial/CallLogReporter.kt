@@ -82,6 +82,7 @@ object CallLogReporter {
     private fun isListening() = legacyListener != null || modernCallback != null
 
     private fun onState(context: Context, state: Int) {
+        LiveCallReporter.telephony(context, state)
         when (state) {
             TelephonyManager.CALL_STATE_RINGING, TelephonyManager.CALL_STATE_OFFHOOK -> sawActivity = true
             TelephonyManager.CALL_STATE_IDLE -> if (sawActivity) {

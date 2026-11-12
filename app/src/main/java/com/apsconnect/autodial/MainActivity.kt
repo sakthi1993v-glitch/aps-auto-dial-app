@@ -22,6 +22,8 @@ import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ProgressBar
@@ -135,6 +137,10 @@ class MainActivity : ComponentActivity() {
         )
         outer.addView(root)
         outer.addView(simBar)
+        if (!isStudentEntry) outer.addView(Button(this).apply {
+            text = "Live call setup"
+            setOnClickListener { startActivity(Intent(this@MainActivity, LiveCallSetupActivity::class.java)) }
+        })
         setContentView(outer)
 
         // Session cookie (staff/manager login) persist aaganum na cookie accept explicit-a
@@ -149,6 +155,17 @@ class MainActivity : ComponentActivity() {
         // Preserve the existing one-time upgrade migration below.
         wipeStaleState()
 
+        if (!isStudentEntry && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            WebViewCompat.addWebMessageListener(webView, "APSNativeLiveMessages", setOf(crmBase)) { view, message, origin, mainFrame, reply ->
+                val path = Uri.parse(view.url ?: "").path ?: ""
+                if (LiveBridgePolicy.allowed(origin.scheme, origin.host, path, mainFrame) && message.data == "prepareLogout") {
+                    Thread {
+                        val ok = LiveCallReporter.clearBeforeLogout()
+                        runOnUiThread { reply.postMessage(if (ok) "cleared" else "unconfirmed") }
+                    }.start()
+                }
+            }
+        }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
@@ -170,6 +187,10 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageFinished(view: WebView, url: String?) {
                 if (!mainFrameFailed && isCurrentLoad(url)) pageReady()
+                val page = Uri.parse(url ?: "")
+                if (!isStudentEntry && LiveBridgePolicy.allowed(page.scheme,page.host,page.path,true)) {
+                    view.evaluateJavascript("""(function(){if(!window.APSNativeLiveMessages)return;window.APSLiveCalls={prepareLogout:function(){return new Promise(function(resolve){var done=false;var finish=function(v){if(done)return;done=true;resolve(v)};APSNativeLiveMessages.onmessage=function(e){finish(e.data==='cleared')};setTimeout(function(){finish(false)},2500);APSNativeLiveMessages.postMessage('prepareLogout')})}}})()""",null)
+                }
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -222,6 +243,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (!isStudentEntry) {
+            LiveCallReporter.start(this)
             startBackgroundWorkers()
             updatePermissionBanner()
             updateSimBar()
