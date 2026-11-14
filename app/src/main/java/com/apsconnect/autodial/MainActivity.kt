@@ -70,7 +70,8 @@ class MainActivity : ComponentActivity() {
     private val loadTimeout = Runnable {
         if (progressBar.visibility == View.VISIBLE) {
             // Mark failure before stopping; a late onPageFinished must not hide Retry.
-            showLoadError("CRM load aaga neram aaguthu. Internet check pannitu Retry pannunga.")
+            showLoadError(t("The CRM is taking too long to load. Check your internet connection and tap Retry.",
+                "CRM ஏற்றப்பட அதிக நேரம் ஆகிறது. இணைய இணைப்பைச் சரிபார்த்து மீண்டும் முயற்சிக்கவும்."))
             webView.stopLoading()
         }
     }
@@ -154,10 +155,28 @@ class MainActivity : ComponentActivity() {
         )
         outer.addView(root)
         outer.addView(simBar)
-        if (!isStudentEntry) outer.addView(Button(this).apply {
-            text = "Phone / SIM setup"
-            setOnClickListener { startActivity(Intent(this@MainActivity, LiveCallSetupActivity::class.java)) }
-        })
+        if (!isStudentEntry) {
+            // Bottom strip: Phone / SIM setup (left) and the English / Tamil switch (right).
+            val actions = android.widget.LinearLayout(this)
+            actions.orientation = android.widget.LinearLayout.HORIZONTAL
+            actions.addView(Button(this).apply {
+                text = t("Phone / SIM setup", "போன் / சிம் அமைப்பு")
+                isAllCaps = false
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { startActivity(Intent(this@MainActivity, LiveCallSetupActivity::class.java)) }
+            })
+            actions.addView(Button(this).apply {
+                text = Lang.toggleLabel(this@MainActivity)
+                isAllCaps = false
+                contentDescription = t("Switch language to Tamil", "மொழியை ஆங்கிலத்திற்கு மாற்று")
+                layoutParams = android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                setOnClickListener {
+                    Lang.set(this@MainActivity, !Lang.isTamil(this@MainActivity))
+                    recreate()   // rebuild every native view in the new language; the CRM page is restored/reloaded
+                }
+            })
+            outer.addView(actions)
+        }
         setContentView(outer)
 
         // Session cookie (staff/manager login) persist aaganum na cookie accept explicit-a
@@ -250,13 +269,15 @@ class MainActivity : ComponentActivity() {
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame && isCurrentLoad(request.url.toString())) {
-                    showLoadError("CRM connect aagala. Internet check pannitu Retry pannunga.")
+                    showLoadError(t("Could not connect to the CRM. Check your internet connection and tap Retry.",
+                        "CRM-உடன் இணைக்க முடியவில்லை. இணைய இணைப்பைச் சரிபார்த்து மீண்டும் முயற்சிக்கவும்."))
                 }
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
                 if (request.isForMainFrame && isCurrentLoad(request.url.toString()) && response.statusCode >= 400) {
-                    showLoadError("CRM server response ${response.statusCode}. Konjam neram kazhithu Retry pannunga.")
+                    showLoadError(t("The CRM server returned an error (${response.statusCode}). Wait a moment and tap Retry.",
+                        "CRM சர்வர் பிழையைத் தெரிவித்தது (${response.statusCode}). சிறிது நேரம் கழித்து மீண்டும் முயற்சிக்கவும்."))
                 }
             }
 
@@ -264,7 +285,8 @@ class MainActivity : ComponentActivity() {
                 handler.cancel()
                 // Keep failed secondary assets from replacing an otherwise usable CRM page.
                 if (isCurrentLoad(error.url)) {
-                    showLoadError("Secure CRM connection verify aagala. Admin-kitta sollunga; appuram Retry pannunga.")
+                    showLoadError(t("Could not verify the secure CRM connection. Contact the admin, then tap Retry.",
+                        "பாதுகாப்பான CRM இணைப்பைச் சரிபார்க்க முடியவில்லை. நிர்வாகியைத் தொடர்புகொண்டு, பின்னர் மீண்டும் முயற்சிக்கவும்."))
                 }
             }
         }
@@ -321,6 +343,8 @@ class MainActivity : ComponentActivity() {
     // v1.10 Office SIM: strip BELOW the WebView (never overlays the CRM page) showing which SIM is
     // counted + Change, or a visible warning when calls cannot be matched / are being held.
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    /** English text, or Tamil when the staff member switched the app language. */
+    private fun t(en: String, ta: String) = Lang.t(this, en, ta)
 
     private fun buildSimBar(): View {
         val bar = android.widget.LinearLayout(this)
@@ -337,7 +361,7 @@ class MainActivity : ComponentActivity() {
         simBarText.layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
 
         val changeBtn = Button(this)
-        changeBtn.text = "Change"
+        changeBtn.text = t("Change", "மாற்று")
         changeBtn.setOnClickListener { showSimChooser() }
 
         bar.addView(simBarText)
@@ -375,22 +399,25 @@ class MainActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
         when (snap.status) {
             OfficeSim.Status.NO_PERMISSION -> showSimWarning(
-                "Phone permission illa -- SIM check aagala, calls report aagathu" +
-                    (if (callPhoneGranted) " (auto-dial default SIM-la pogum)" else ""), false)
+                t("Phone permission is missing. The SIM could not be checked, so calls will not be reported.",
+                    "போன் அனுமதி இல்லை. சிம்மைச் சரிபார்க்க முடியவில்லை; அழைப்புகள் பதிவாகாது.") +
+                    (if (callPhoneGranted) t(" Auto dial will use the default SIM.", " தானியங்கி அழைப்பு இயல்புநிலை சிம்மில் செல்லும்.") else ""), false)
             OfficeSim.Status.UNAVAILABLE ->
-                if (snap.hold) showSimWarning("SIM list padikka mudiyala -- calls hold-la irukku, admin-kitta sollunga", false)
+                if (snap.hold) showSimWarning(t("Could not read the SIM list. Calls are on hold; contact the admin.",
+                    "சிம் பட்டியலைப் படிக்க முடியவில்லை. அழைப்புகள் நிறுத்தி வைக்கப்பட்டுள்ளன; நிர்வாகியைத் தொடர்புகொள்ளவும்."), false)
                 else { simBar.removeCallbacks(simBarHideRunnable); simBar.visibility = View.GONE }
             OfficeSim.Status.NEED_CHOICE -> {
-                showSimWarning((snap.note ?: "Office SIM select pannala") + " -- calls report aagathu", true)
+                showSimWarning((snap.note ?: t("The Office SIM is not selected", "அலுவலக சிம் தேர்ந்தெடுக்கப்படவில்லை")) +
+                    t(" — calls will not be reported.", " — அழைப்புகள் பதிவாகாது."), true)
                 if (!OfficeSim.snoozed(this)) showSimChooser()
             }
             OfficeSim.Status.SINGLE, OfficeSim.Status.MULTI_READY -> {
                 val sim = snap.chosen
-                val label = if (sim != null) "Office SIM: ${sim.maskedLabel}" else "Office SIM"
+                val label = if (sim != null) t("Office SIM: ", "அலுவலக சிம்: ") + sim.maskedLabel else t("Office SIM", "அலுவலக சிம்")
                 if (OfficeSim.unknownHold(this)) {
-                    showSimWarning("Could not match SIM calls – tell admin. ($label)", true)
+                    showSimWarning(t("Could not match SIM calls – tell the admin. ($label)", "சிம் அழைப்புகளைப் பொருத்த முடியவில்லை – நிர்வாகியிடம் தெரிவிக்கவும். ($label)"), true)
                 } else {
-                    showSimInfo(label + (snap.note?.let { n -> " -- $n" } ?: ""))
+                    showSimInfo(label + (snap.note?.let { n -> " — $n" } ?: ""))
                 }
             }
         }
@@ -400,26 +427,26 @@ class MainActivity : ComponentActivity() {
         if (isFinishing || isDestroyed || simDialog?.isShowing == true) return
         val sims = OfficeSim.listActive(this)
         if (sims.isEmpty()) {
-            Toast.makeText(this, "SIM details padikka mudiyala (Phone permission check pannunga)", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, t("Could not read SIM details. Check the Phone permission.", "சிம் விவரங்களைப் படிக்க முடியவில்லை. போன் அனுமதியைச் சரிபார்க்கவும்."), Toast.LENGTH_LONG).show()
             return
         }
         val current = OfficeSim.snapshot(this).chosen
         var picked = sims.indexOfFirst { it.subId == current?.subId }
         lateinit var dlg: android.app.AlertDialog
         dlg = android.app.AlertDialog.Builder(this)
-            .setTitle("Office SIM-a select pannunga")
+            .setTitle(t("Choose the Office SIM", "அலுவலக சிம்மைத் தேர்ந்தெடுக்கவும்"))
             .setSingleChoiceItems(sims.map { it.maskedLabel }.toTypedArray(), picked) { _, which ->
                 picked = which
                 dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
             }
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(t("Save", "சேமி")) { _, _ ->
                 if (picked >= 0) {
                     OfficeSim.choose(this, sims[picked])
                     CallLogReporter.syncCallLog(this)   // upload the office-SIM calls held back until now
                 }
                 updateSimBar()
             }
-            .setNegativeButton("Later") { _, _ ->
+            .setNegativeButton(t("Later", "பிறகு")) { _, _ ->
                 OfficeSim.snooze(this)   // do not re-open on every resume for 6 hours
             }
             .create()
@@ -444,7 +471,7 @@ class MainActivity : ComponentActivity() {
         permissionBannerText.textSize = 13f
 
         val fixBtn = Button(this)
-        fixBtn.text = "Settings-ku po, fix pannunga"
+        fixBtn.text = t("Open Settings to fix", "சரிசெய்ய அமைப்புகளைத் திற")
         fixBtn.setOnClickListener {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.parse("package:$packageName")
@@ -470,13 +497,16 @@ class MainActivity : ComponentActivity() {
         }
 
         val broken = mutableListOf<String>()
-        if (callLogMissing) broken.add("Call duration tracking")
-        if (locationMissing) broken.add("Attendance location")
+        if (callLogMissing) broken.add(t("Call duration tracking", "அழைப்பு நேரப் பதிவு"))
+        if (locationMissing) broken.add(t("Attendance location", "வருகைப் பதிவு இருப்பிடம்"))
 
-        permissionBannerText.text =
-            "${broken.joinToString(" & ")} work aagala -- permission illa.\n" +
-            "Settings > Apps > APS Connect > ⋮ (top-right) > \"Allow restricted settings\" " +
-            "adhukku appuram Permissions-la Call logs / Phone / Location-a Allow pannunga."
+        permissionBannerText.text = t(
+            "${broken.joinToString(" & ")} is not working: permission is missing.\n" +
+            "Open Settings > Apps > APS Connect > ⋮ (top right) > \"Allow restricted settings\", " +
+            "then allow Call logs, Phone and Location under Permissions.",
+            "${broken.joinToString(" & ")} செயல்படவில்லை: அனுமதி இல்லை.\n" +
+            "அமைப்புகள் > Apps > APS Connect > ⋮ (மேல் வலது) > \"Allow restricted settings\" என்பதைத் தேர்ந்தெடுத்து, " +
+            "பின்னர் Permissions-இல் Call logs, Phone, Location ஆகியவற்றை அனுமதிக்கவும்.")
         permissionBanner.visibility = View.VISIBLE
     }
 
@@ -517,19 +547,20 @@ class MainActivity : ComponentActivity() {
 
         val text = TextView(this)
         errorText = text
-        text.text = "CRM connect aagala. Internet check pannitu Retry pannunga."
+        text.text = t("Could not connect to the CRM. Check your internet connection and tap Retry.",
+            "CRM-உடன் இணைக்க முடியவில்லை. இணைய இணைப்பைச் சரிபார்த்து மீண்டும் முயற்சிக்கவும்.")
         text.setPadding(40, 0, 40, 40)
         text.gravity = Gravity.CENTER
         text.textSize = 16f
 
         val retryBtn = Button(this)
-        retryBtn.text = "Retry"
+        retryBtn.text = t("Retry", "மீண்டும் முயற்சி")
         retryBtn.setOnClickListener {
             beginPageLoad()
             webView.loadUrl(crmUrl)
         }
 
-        val browserBtn = Button(this).apply { this.text = "Open CRM in browser"; setOnClickListener { UpdateChecker.browser(this@MainActivity,crmUrl) } }
+        val browserBtn = Button(this).apply { this.text = t("Open CRM in browser", "CRM-ஐ உலாவியில் திற"); setOnClickListener { UpdateChecker.browser(this@MainActivity,crmUrl) } }
         inner.addView(text)
         inner.addView(retryBtn)
         inner.addView(browserBtn)
@@ -598,7 +629,8 @@ class MainActivity : ComponentActivity() {
         if (!granted) {
             Toast.makeText(
                 this,
-                "Call permission illa. Settings-la app permission allow pannunga, auto-dial work aagum",
+                t("Call permission is missing. Allow it in Settings so auto dial can work.",
+                    "அழைப்பு அனுமதி இல்லை. தானியங்கி அழைப்பு செயல்பட அமைப்புகளில் அனுமதிக்கவும்."),
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -612,9 +644,10 @@ class MainActivity : ComponentActivity() {
             val snapshot = OfficeSim.snapshot(this)
             val handle = OfficeSim.chosenHandle(this,snapshot)
             if (!LiveCallPolicy.directDialAllowed(snapshot.hold,snapshot.active.size,snapshot.chosen != null,handle != null)) {
-                android.app.AlertDialog.Builder(this).setTitle("Confirm Office SIM before auto dial")
-                    .setMessage("The selected Office SIM cannot be confirmed for dialing. Open Phone / SIM setup and choose or confirm the Office SIM. No call was placed.")
-                    .setNegativeButton("Cancel",null).setPositiveButton("Open Phone / SIM setup") { _,_ -> startActivity(Intent(this,LiveCallSetupActivity::class.java)) }.show()
+                android.app.AlertDialog.Builder(this).setTitle(t("Confirm Office SIM before auto dial", "தானியங்கி அழைப்புக்கு முன் அலுவலக சிம்மை உறுதிசெய்யவும்"))
+                    .setMessage(t("The selected Office SIM cannot be confirmed for dialing. Open Phone / SIM setup and choose or confirm the Office SIM. No call was placed.",
+                        "தேர்ந்தெடுத்த அலுவலக சிம்மை அழைப்புக்கு உறுதிசெய்ய முடியவில்லை. போன் / சிம் அமைப்பைத் திறந்து அலுவலக சிம்மைத் தேர்ந்தெடுக்கவும் அல்லது உறுதிசெய்யவும். எந்த அழைப்பும் செய்யப்படவில்லை."))
+                    .setNegativeButton(t("Cancel", "ரத்து செய்"),null).setPositiveButton(t("Open Phone / SIM setup", "போன் / சிம் அமைப்பைத் திற")) { _,_ -> startActivity(Intent(this,LiveCallSetupActivity::class.java)) }.show()
                 return
             }
             if (handle != null) {
@@ -638,10 +671,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         android.app.AlertDialog.Builder(this)
-            .setTitle("Veliya pōganumaa?")
-            .setMessage("APS Connect app-a close pannattumaa?")
-            .setPositiveButton("Aamaam, veliya pō") { _, _ -> finish() }
-            .setNegativeButton("Illa, irukkatum", null)
+            .setTitle(t("Exit the app?", "செயலியிலிருந்து வெளியேறவா?"))
+            .setMessage(t("Do you want to close APS Connect?", "APS Connect செயலியை மூடலாமா?"))
+            .setPositiveButton(t("Exit", "வெளியேறு")) { _, _ -> finish() }
+            .setNegativeButton(t("Stay", "இல்லை"), null)
             .show()
     }
 

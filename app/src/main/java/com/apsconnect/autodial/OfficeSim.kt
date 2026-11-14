@@ -173,10 +173,10 @@ object OfficeSim {
             }
             if (!deliberate) {   // auto choice whose SIM changed: re-pick the lone SIM, flag it
                 write(context, only, true)
-                return Snapshot(Status.SINGLE, active, only, emptySet(), false, "SIM maari irukku")
+                return Snapshot(Status.SINGLE, active, only, emptySet(), false, Lang.t(context, "The SIM changed; the new SIM was selected", "சிம் மாறியுள்ளது; புதிய சிம் தேர்ந்தெடுக்கப்பட்டது"))
             }
             // deliberate choice vanished, a different lone SIM is present: hold until confirmed
-            return Snapshot(Status.NEED_CHOICE, active, null, learned, true, "Pazhaya office SIM illa -- confirm pannunga")
+            return Snapshot(Status.NEED_CHOICE, active, null, learned, true, Lang.t(context, "The previous Office SIM was not found; please confirm the SIM", "முந்தைய அலுவலக சிம் கிடைக்கவில்லை; சிம்மை உறுதிசெய்யவும்"))
         }
         if (deliberate && match != null) return Snapshot(Status.MULTI_READY, active, match, learned, false, null)
         if (hasSaved && !deliberate) clearChoice(context)   // auto choice is not valid for 2+ SIMs
@@ -193,7 +193,7 @@ object OfficeSim {
         if (active.isEmpty()) return Snapshot(Status.UNAVAILABLE, active, null, learned, deliberate, null)
         val chosen = saved(p, active)
         if (chosen != null && (deliberate || active.size == 1)) return Snapshot(if (active.size == 1) Status.SINGLE else Status.MULTI_READY, active, chosen, learned, false, null)
-        return Snapshot(Status.NEED_CHOICE, active, null, learned, true, "Office SIM confirmation required")
+        return Snapshot(Status.NEED_CHOICE, active, null, learned, true, Lang.t(context, "Office SIM confirmation required", "அலுவலக சிம் உறுதிப்படுத்தல் தேவை"))
     }
     fun explicitChoice(context: Context): Boolean = prefs(context).contains("subId") && !prefs(context).getBoolean("auto", false)
 

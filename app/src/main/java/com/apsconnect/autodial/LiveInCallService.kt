@@ -17,6 +17,7 @@ import java.util.UUID
 /** System-bound dialer service. Local controls cover every Telecom call; reporting
  * remains opt-in and fails closed unless the selected office SIM is positively matched. */
 class LiveInCallService : InCallService() {
+    private fun t(en: String, ta: String) = Lang.t(this, en, ta)
     companion object {
         var current: LiveInCallService? = null
             private set
@@ -79,12 +80,12 @@ class LiveInCallService : InCallService() {
     }
     private fun notifyCall(call: Call) {
         val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("aps_calls", "Phone calls", NotificationManager.IMPORTANCE_HIGH).apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE })
+        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("aps_calls", t("Phone calls","போன் அழைப்புகள்"), NotificationManager.IMPORTANCE_HIGH).apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE })
         val intent = Intent(this, InCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val open = PendingIntent.getActivity(this, 8601, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, "aps_calls").setSmallIcon(android.R.drawable.sym_call_incoming)
-            .setContentTitle(if (call.state == Call.STATE_RINGING) "Incoming phone call" else "Phone call in progress")
-            .setContentText("Tap to answer or manage this call").setContentIntent(open).setOngoing(true)
+            .setContentTitle(if (call.state == Call.STATE_RINGING) t("Incoming phone call","உள்வரும் போன் அழைப்பு") else t("Phone call in progress","போன் அழைப்பு நடைபெறுகிறது"))
+            .setContentText(t("Tap to answer or manage this call","இந்த அழைப்பை ஏற்க அல்லது நிர்வகிக்க தொடவும்")).setContentIntent(open).setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
         if (call.state == Call.STATE_RINGING) notification.setFullScreenIntent(open, true)
