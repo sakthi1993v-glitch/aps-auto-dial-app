@@ -51,6 +51,9 @@ class MainActivity : ComponentActivity() {
     private val crmUrl: String
         get() = if (isStudentEntry) "$crmBase/student/login" else crmBase
     private val callPermissionRequestCode = 100
+    private val geoPermissionRequestCode = 101
+    private var pendingGeoCallback: android.webkit.GeolocationPermissions.Callback? = null
+    private var pendingGeoOrigin: String? = null
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
     private lateinit var errorView: View
@@ -164,6 +167,24 @@ class MainActivity : ComponentActivity() {
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true   // CRM login state uses sessionStorage
+
+        // 2026-11-14 (v1.15): attendance punch-in calls navigator.geolocation inside this WebView. Without a
+        // WebChromeClient (and ACCESS_*_LOCATION) Android silently denies it. Only the CRM's own origin gets
+        // the location; any other site is refused. Everything else keeps the default WebChromeClient behaviour.
+        webView.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: android.webkit.GeolocationPermissions.Callback?) {
+                if (callback == null) return
+                if (isStudentEntry || origin == null || !origin.startsWith(crmBase)) { callback.invoke(origin, false, false); return }
+                val has = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (has) { callback.invoke(origin, true, false); return }
+                pendingGeoCallback?.invoke(pendingGeoOrigin, false, false)
+                pendingGeoCallback = callback; pendingGeoOrigin = origin
+                ActivityCompat.requestPermissions(this@MainActivity,
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), geoPermissionRequestCode)
+            }
+            override fun onGeolocationPermissionsHidePrompt() { pendingGeoCallback = null; pendingGeoOrigin = null }
+        }
 
         // Reuse HTTP cache according to server freshness headers and versioned asset URLs.
         // Preserve the existing one-time upgrade migration below.
@@ -441,21 +462,21 @@ class MainActivity : ComponentActivity() {
     private fun updatePermissionBanner() {
         val granted = { p: String -> ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED }
         val callLogMissing = !granted(Manifest.permission.READ_PHONE_STATE) || !granted(Manifest.permission.READ_CALL_LOG)
-        val smsMissing = !granted(Manifest.permission.SEND_SMS)
+        val locationMissing = !granted(Manifest.permission.ACCESS_FINE_LOCATION) && !granted(Manifest.permission.ACCESS_COARSE_LOCATION)
 
-        if (!callLogMissing && !smsMissing) {
+        if (!callLogMissing && !locationMissing) {
             permissionBanner.visibility = View.GONE
             return
         }
 
         val broken = mutableListOf<String>()
         if (callLogMissing) broken.add("Call duration tracking")
-        if (smsMissing) broken.add("Bulk SMS")
+        if (locationMissing) broken.add("Attendance location")
 
         permissionBannerText.text =
             "${broken.joinToString(" & ")} work aagala -- permission illa.\n" +
             "Settings > Apps > APS Connect > ⋮ (top-right) > \"Allow restricted settings\" " +
-            "adhukku appuram Permissions-la Call logs / Phone / SMS-a Allow pannunga."
+            "adhukku appuram Permissions-la Call logs / Phone / Location-a Allow pannunga."
         permissionBanner.visibility = View.VISIBLE
     }
 
@@ -519,12 +540,13 @@ class MainActivity : ComponentActivity() {
     private fun requestCallPermissionIfNeeded() {
         // 2026-08-05: CALL_PHONE (auto-dial) + READ_PHONE_STATE + READ_CALL_LOG (call-duration
         // tracking) requested together, one dialog -- staff taps Allow once, not three times.
-        // 2026-08-06 (v1.6): SEND_SMS joins the same batch, for Bulk SMS.
+        // 2026-11-14 (v1.15): SEND_SMS dropped (Play Protect); location joins the batch for attendance.
         val needed = arrayOf(
             Manifest.permission.CALL_PHONE,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CALL_LOG,
-            Manifest.permission.SEND_SMS
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
 
         if (needed.isNotEmpty()) {
@@ -542,16 +564,21 @@ class MainActivity : ComponentActivity() {
         if (granted(Manifest.permission.READ_PHONE_STATE) && granted(Manifest.permission.READ_CALL_LOG)) {
             CallLogReporter.startListening(this)
         }
-        if (granted(Manifest.permission.SEND_SMS)) {
-            // Label = what the manager sees in the dashboard's phone list.
-            BulkSmsSender.start(this, android.os.Build.MODEL)
-        }
     }
 
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == geoPermissionRequestCode) {
+            // The CRM page asked for the location (attendance punch-in) while permission was missing.
+            val ok = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            pendingGeoCallback?.invoke(pendingGeoOrigin, ok, false)
+            pendingGeoCallback = null; pendingGeoOrigin = null
+            updatePermissionBanner()
+            return
+        }
         if (requestCode == callPermissionRequestCode) {
             startBackgroundWorkers()
             updatePermissionBanner()
@@ -632,7 +659,6 @@ class MainActivity : ComponentActivity() {
         simDialog?.dismiss()
         simDialog = null
         CallLogReporter.stopListening(this)
-        BulkSmsSender.stop()
         super.onDestroy()
     }
 }

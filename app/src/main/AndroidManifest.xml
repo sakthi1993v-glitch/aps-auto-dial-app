@@ -12,10 +12,13 @@
          TelephonyManager, READ_CALL_LOG to read the actual duration afterward. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
-    <!-- 2026-08-06 (v1.6): Bulk SMS. The CRM queues numbers, this app pulls them one at a
-         time and sends through the phone's own SIM, so the staff member's existing daily
-         SMS allowance is what pays for it. Server side counts and caps; this only sends. -->
-    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- 2026-11-14 (v1.15): SEND_SMS removed on purpose. Google Play Protect blocked the sideloaded
+         APK ("app blocked to protect your device"); SMS + call log together is its riskiest combination.
+         Bulk SMS from the phone is gone; the call log and CALL_PHONE stay. -->
+    <!-- 2026-11-14 (v1.15): staff attendance punch-in reads the phone location through the CRM
+         WebView (navigator.geolocation). Android needs both location permissions requested together. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:allowBackup="true"
