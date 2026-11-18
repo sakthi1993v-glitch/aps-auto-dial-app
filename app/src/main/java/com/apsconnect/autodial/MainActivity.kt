@@ -442,6 +442,12 @@ class MainActivity : ComponentActivity() {
             .setPositiveButton(t("Save", "சேமி")) { _, _ ->
                 if (picked >= 0) {
                     OfficeSim.choose(this, sims[picked])
+                    // Visible confirmation (the blue strip hides itself after 5 s): which SIM is now active.
+                    val sel = sims[picked]
+                    Toast.makeText(this,
+                        t("Office SIM selected: ${sel.maskedLabel} - Active. Only this SIM's calls are reported.",
+                          "Office SIM தேர்வு செய்யப்பட்டது: ${sel.maskedLabel} - Active. இந்த SIM-ன் அழைப்புகள் மட்டும் பதிவாகும்."),
+                        Toast.LENGTH_LONG).show()
                     CallLogReporter.syncCallLog(this)   // upload the office-SIM calls held back until now
                 }
                 updateSimBar()
