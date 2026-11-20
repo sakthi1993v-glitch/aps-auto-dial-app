@@ -87,6 +87,7 @@ object CallLogReporter {
             TelephonyManager.CALL_STATE_RINGING, TelephonyManager.CALL_STATE_OFFHOOK -> sawActivity = true
             TelephonyManager.CALL_STATE_IDLE -> if (sawActivity) {
                 sawActivity = false
+                CallReturn.onCallEnded(context)   // a call placed from the CRM ended: bring the CRM back for the feedback timer
                 // CallLog row can land a moment after IDLE (esp. missed calls): sync at ~1.5 s
                 // and again at ~6 s (idempotent via eventId). Periodic sync is the safety net.
                 Thread {

@@ -144,6 +144,11 @@ class LiveCallSetupActivity : Activity() {
                 }.show()
         }
         button(t("View / restore default apps","இயல்புநிலைச் செயலிகளைப் பார் / மீட்டெடு")) { openSettings(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+        section(t("5b. Auto calling: back to the CRM after each call","5ஆ. தானியங்கி அழைப்பு: ஒவ்வொரு அழைப்புக்கும் பின் CRM-க்குத் திரும்புதல்"))
+        val returnReady = CallReturn.ready(this)
+        text(t("After a call from the CRM ends, the CRM must come back on screen so the feedback timer starts and the next lead dials. Status: ${if(returnReady) (if(CallReturn.isDefaultPhone(this)) "Ready (APS Connect is the Phone app)" else "Ready (display over other apps allowed)") else "NOT ready - without this you must tap back to the CRM after every call"}.",
+            "CRM-இலிருந்து செய்த அழைப்பு முடிந்ததும் CRM திரையில் வர வேண்டும்; அப்போதுதான் feedback நேரம் தொடங்கி அடுத்த லீட் அழைக்கப்படும். நிலை: ${if(returnReady) "தயார்" else "தயாராக இல்லை - இது இல்லாமல் ஒவ்வொரு அழைப்புக்கும் பின் நீங்களே CRM-க்குத் திரும்ப வேண்டும்"}."))
+        if(!returnReady) button(t("Allow display over other apps","மற்ற செயலிகளின் மேல் காட்ட அனுமதி")) { openSettings(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:$packageName"))) }
         section(t("6. Incoming full-screen access","6. உள்வரும் முழுத்திரை அணுகல்"))
         text(when(status.fullScreen) {
             null -> t("Not separately required on this Android version.","இந்த Android பதிப்பில் தனியாகத் தேவையில்லை.")

@@ -325,7 +325,13 @@ class MainActivity : ComponentActivity() {
     // grant it via Settings and switch back -- no app restart needed.
     override fun onResume() {
         super.onResume()
+        CallReturn.crmVisible = true
         UpdateChecker.onResume(this)
+        // A call placed from the CRM just ended: tell the page so it shows the feedback sheet at once (it normally waits for a focus event, which a call screen can swallow).
+        if (!isStudentEntry && ::webView.isInitialized && CallReturn.consumeEnded()) {
+            webView.postDelayed({ webView.evaluateJavascript("window.dispatchEvent(new Event('focus'))", null) }, 400)
+        }
+        if (!isStudentEntry && ::webView.isInitialized) webView.evaluateJavascript("window.__apsAutoReturn=" + CallReturn.ready(this), null)   // the CRM Dial page warns when this is false
         if (!isStudentEntry) {
             LiveCallReporter.start(this)
             startBackgroundWorkers()
@@ -338,7 +344,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onPause() { UpdateChecker.onPause(this); super.onPause() }
+    override fun onPause() { CallReturn.crmVisible = false; UpdateChecker.onPause(this); super.onPause() }
 
     // v1.10 Office SIM: strip BELOW the WebView (never overlays the CRM page) showing which SIM is
     // counted + Change, or a visible warning when calls cannot be matched / are being held.
@@ -661,6 +667,7 @@ class MainActivity : ComponentActivity() {
                 OfficeSim.recordDial(this,phoneNumber)
             }
         }
+        CallReturn.arm()   // when this call ends the app brings the CRM back (CallReturn)
         startActivity(callIntent)
     }
 

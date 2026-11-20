@@ -19,6 +19,8 @@
          WebView (navigator.geolocation). Android needs both location permissions requested together. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- 2026-11-20 (v1.16): lets the app bring the CRM back to the screen when a call placed from the CRM ends (auto calling needs that); optional, the setup screen asks. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
