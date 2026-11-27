@@ -154,29 +154,8 @@ class MainActivity : ComponentActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         )
         outer.addView(root)
-        outer.addView(simBar)
-        if (!isStudentEntry) {
-            // Bottom strip: Phone / SIM setup (left) and the English / Tamil switch (right).
-            val actions = android.widget.LinearLayout(this)
-            actions.orientation = android.widget.LinearLayout.HORIZONTAL
-            actions.addView(Button(this).apply {
-                text = t("Phone / SIM setup", "போன் / சிம் அமைப்பு")
-                isAllCaps = false
-                layoutParams = android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                setOnClickListener { startActivity(Intent(this@MainActivity, LiveCallSetupActivity::class.java)) }
-            })
-            actions.addView(Button(this).apply {
-                text = Lang.toggleLabel(this@MainActivity)
-                isAllCaps = false
-                contentDescription = t("Switch language to Tamil", "மொழியை ஆங்கிலத்திற்கு மாற்று")
-                layoutParams = android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                setOnClickListener {
-                    Lang.set(this@MainActivity, !Lang.isTamil(this@MainActivity))
-                    recreate()   // rebuild every native view in the new language; the CRM page is restored/reloaded
-                }
-            })
-            outer.addView(actions)
-        }
+        // 1.17: the bottom SIM strip and the Phone / SIM setup + language buttons are gone. Staff and managers open them from the CRM
+        // Profile menu (📱 Phone, SIM & WhatsApp), which calls the existing openSetup / getSetupStatus bridge. simBar stays built but is never shown.
         setContentView(outer)
 
         // Session cookie (staff/manager login) persist aaganum na cookie accept explicit-a
