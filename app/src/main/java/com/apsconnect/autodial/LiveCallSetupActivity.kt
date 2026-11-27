@@ -85,8 +85,7 @@ class LiveCallSetupActivity : Activity() {
         val status=LivePhoneSetupStatus.capture(this)
         text(t("Phone / SIM setup","போன் / சிம் அமைப்பு"),25f)
         button(Lang.toggleLabel(this)) { Lang.set(this,!Lang.isTamil(this)); recreate() }
-        text(t("Complete the steps below for staff auto dial and live CRM reports. Android asks for every permission or default-app change; this screen cannot grant access silently.",
-            "ஊழியர் தானியங்கி அழைப்பு மற்றும் நேரடி CRM அறிக்கைகளுக்கு கீழுள்ள படிகளை முடிக்கவும். ஒவ்வொரு அனுமதிக்கும் அல்லது இயல்புநிலைச் செயலி மாற்றத்துக்கும் Android கேட்கும்; இந்தத் திரை அமைதியாக அணுகலை வழங்க முடியாது."))
+        text(t("Tap the buttons below. Android will ask you to allow each item.","கீழே உள்ள பட்டன்களைத் தட்டவும். ஒவ்வொன்றுக்கும் Android அனுமதி கேட்கும்."))
         section(t("1. Phone and call-log access","1. போன் மற்றும் அழைப்புப் பதிவு அணுகல்"))
         text(t("Phone state: ${allowed(status.phone)}\nCall history: ${allowed(status.callLog)}\nPlace calls: ${allowed(status.callPhone)}",
             "போன் நிலை: ${allowed(status.phone)}\nஅழைப்பு வரலாறு: ${allowed(status.callLog)}\nஅழைப்புகள் செய்தல்: ${allowed(status.callPhone)}"))
@@ -103,12 +102,10 @@ class LiveCallSetupActivity : Activity() {
         text(if(status.directDialReady) t("CRM auto dial: ready for the available Office SIM account.","CRM தானியங்கி அழைப்பு: கிடைக்கும் அலுவலக சிம் கணக்குக்குத் தயார்.")
             else t("CRM auto dial is blocked until Phone access and a usable Office SIM are confirmed. On multi-SIM phones, APS will not silently call from the personal/default SIM.",
                 "போன் அணுகலும் பயன்படுத்தக்கூடிய அலுவலக சிம்மும் உறுதியாகும் வரை CRM தானியங்கி அழைப்பு தடுக்கப்பட்டுள்ளது. பல சிம் போன்களில் தனிப்பட்ட/இயல்புநிலை சிம்மிலிருந்து APS அமைதியாக அழைக்காது."))
-        text(t("Only positively matched Office-SIM calls are reported, including numbers outside the CRM. Personal or ambiguous SIM details stay hidden.",
-            "உறுதியாகப் பொருந்திய அலுவலக சிம் அழைப்புகள் மட்டுமே பதிவாகும் (CRM-க்கு வெளியே உள்ள எண்கள் உட்பட). தனிப்பட்ட அல்லது தெளிவற்ற சிம் விவரங்கள் மறைக்கப்படும்."))
         button(if(status.selected) t("Change / confirm Office SIM","அலுவலக சிம்மை மாற்று / உறுதிசெய்") else t("Choose Office SIM","அலுவலக சிம்மைத் தேர்ந்தெடு")) { chooseOfficeSim() }
-        section(t("3. Live reporting consent","3. நேரடி அறிக்கை ஒப்புதல்"))
-        text(t("Live reporting: ${if(status.liveReporting) "Enabled" else "Off"}. When enabled, your Office-SIM status, available counterpart number and connection time are visible to your branch manager. No audio is recorded or sent.",
-            "நேரடி அறிக்கை: ${if(status.liveReporting) "இயக்கத்தில்" else "நிறுத்தத்தில்"}. இயக்கினால், உங்கள் அலுவலக சிம் நிலை, கிடைக்கும் மறுமுனை எண், இணைப்பு நேரம் ஆகியவை உங்கள் கிளை மேலாளருக்குத் தெரியும். ஒலி பதிவு செய்யப்படாது, அனுப்பப்படாது."))
+        section(t("3. Live call status","3. நேரடி அழைப்பு நிலை"))
+        text(t("Lets your manager see, live, whether you are on a call (talking / ringing). Status: ${if(status.liveReporting) "ON" else "OFF"}. No audio is recorded.",
+            "நீங்கள் இப்போது call-ல் பேசுகிறீர்களா / ring ஆகிறதா என்பதை உங்கள் மேலாளர் நேரடியாகப் பார்க்க உதவும். நிலை: ${if(status.liveReporting) "ON" else "OFF"}. ஒலி பதிவு இல்லை."))
         button(if(status.liveReporting) t("Disable live reporting","நேரடி அறிக்கையை நிறுத்து") else t("Enable live reporting","நேரடி அறிக்கையை இயக்கு")) {
             if(status.liveReporting) { LiveCallReporter.setEnabled(this,false); render() }
             else AlertDialog.Builder(this).setTitle(t("Share live Office-SIM activity?","அலுவலக சிம் செயல்பாட்டை நேரடியாகப் பகிரவா?"))
